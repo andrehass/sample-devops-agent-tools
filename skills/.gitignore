@@ -2,10 +2,6 @@
 # Ignore all files by default
 *
 
-# Disallowed directories
-scripts/
-.claude/
-
 # Allow directories (needed for recursion)
 !*/
 
@@ -30,3 +26,7 @@ scripts/
 !*.svg
 !*.webp
 !*.pdf
+
+# Re-ignore disallowed directories (must come after allowlist)
+**/scripts/
+**/.claude/
