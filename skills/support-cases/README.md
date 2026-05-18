@@ -34,11 +34,11 @@ This skill is used by the following agent types:
 
 To deploy this skill to your Agent Space:
 
-1. Zip the `support-cases/` directory:
+1. Zip the `support-cases/` directory (only including allowed extensions):
 
    ```bash
    cd skills
-   zip -r support-cases.zip support-cases/
+   zip -r support-cases.zip support-cases/ -i '*.md' '*.txt' '*.json' '*.yaml' '*.yml' '*.xml' '*.csv' '*.tsv' '*.html' '*.htm' '*.png' '*.jpg' '*.jpeg' '*.gif' '*.svg' '*.webp' '*.pdf' -x '*/.claude/*'
    ```
 
 2. In the AWS DevOps Agent Operator Web App, navigate to the **Skills** page.
