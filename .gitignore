@@ -13,4 +13,5 @@ __pycache__/
 *.log
 
 # Claude
-.claude/
+.claude/*
+!.claude/CLAUDE.md
