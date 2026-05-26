@@ -78,11 +78,11 @@ aws support describe-cases \
 
 | Strategy | How to Apply |
 |----------|-------------|
-| By time window | Use `--after-time` and `--before-time` to scope cases to the relevant period (e.g., past 30 days, or around a previous incident date). |
-| By service | Review the `serviceCode` field in returned cases to match the affected service (e.g., `amazon-elastic-compute-cloud`, `amazon-rds`). |
-| By severity | Check the `severityCode` field — focus on `urgent` and `critical` cases for major incidents. |
-| By status | Use `--include-resolved-cases` to include closed cases; omit it to see only open cases. |
-| By subject keywords | Scan the `subject` field of returned cases for keywords matching the current incident symptoms. |
+| By time window | Use `--after-time` and `--before-time` to scope cases to the relevant period (e.g., past 30 days, or around a previous incident date), because recent cases are more likely to reflect current infrastructure state. |
+| By service | Review the `serviceCode` field in returned cases to match the affected service (e.g., `amazon-elastic-compute-cloud`, `amazon-rds`), because the same service often exhibits recurring failure patterns. |
+| By severity | Check the `severityCode` field — focus on `urgent` and `critical` cases for major incidents, because higher-severity cases tend to have more detailed root cause analysis from AWS Support. |
+| By status | Use `--include-resolved-cases` to include closed cases, because resolved cases contain the root cause and remediation steps that are most valuable for correlating with the current incident. |
+| By subject keywords | Scan the `subject` field of returned cases for keywords matching the current incident symptoms, because similar symptoms often share underlying causes. |
 
 ---
 
