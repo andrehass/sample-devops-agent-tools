@@ -7,13 +7,13 @@
   "passed": true,
   "sections": {
     "audit": {
-      "score": 96,
+      "score": 100,
       "grade": "A",
       "passed": true,
-      "normalized": 0.96,
+      "normalized": 1.0,
       "critical": 0,
       "warning": 0,
-      "info": 2
+      "info": 0
     },
     "functional": {
       "overall": 0.8847,
