@@ -7,7 +7,7 @@ description: Comprehensive Amazon EKS operational review aligned with the AWS EK
   Triggers on requests like "EKS review", "EKS best practices audit", "EKS operational
   assessment", "review my EKS cluster", or "EKS health check".
 metadata:
-  author: yakiratz
+  author: yakiratz-aws
   version: "1.0.0"
 ---
 
