@@ -38,7 +38,7 @@ The `SKILL.md`, `references/`, and `assets/` directories are what AWS DevOps Age
 
 ## Contributing
 
-See [CONTRIBUTING](CONTRIBUTING.md#security-issue-notifications) for more information.
+See [CONTRIBUTING](CONTRIBUTING.md) for more information.
 
 ## License
 
