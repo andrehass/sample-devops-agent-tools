@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 # DevOps Agent Skills
 
 A repository for AWS DevOps Agent skills. Each skill is packaged as a sub-directory under `skills/` and includes its definition, reference documentation, and evaluation data.
@@ -35,3 +36,22 @@ skills/<skill-name>/
 ```
 
 The `SKILL.md`, `references/`, and `assets/` directories are what AWS DevOps Agent reads at runtime. Everything else supports development, testing, and documentation.
+=======
+## My Project
+
+TODO: Fill this README out!
+
+Be sure to:
+
+* Change the title in this README
+* Edit your repository description on GitHub
+
+## Security
+
+See [CONTRIBUTING](CONTRIBUTING.md#security-issue-notifications) for more information.
+
+## License
+
+This library is licensed under the MIT-0 License. See the LICENSE file.
+
+>>>>>>> ae6a75931fd3c6368210ea6e3cf18fd20093a9ae
