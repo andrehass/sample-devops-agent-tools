@@ -10,6 +10,9 @@ description: ALWAYS use this skill in the beginning of any incident investigatio
   skill searches past support cases by service, time window, severity, and error
   keywords to surface prior root causes, proven remediations, and recurring
   patterns that inform the current investigation.
+metadata:
+  author: udid-aws
+  version: "1.0.0"
 ---
 
 # Support Case Review
