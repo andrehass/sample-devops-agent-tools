@@ -64,6 +64,7 @@ This skill is most suitable for chat and investigation. Below are sample prompts
 
 ### Investigation
 
+- "Investigate the Lambda-Errors alarm"
 - "We're seeing 5xx errors on our ALB — can you investigate?"
 - "RDS connections are maxing out and queries are timing out. What's going on?"
 - "There's a latency spike on our ECS service starting around 3am UTC."
