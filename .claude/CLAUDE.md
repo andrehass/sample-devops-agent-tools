@@ -48,8 +48,13 @@ name: my-skill-name
 description: Use this skill when investigating [specific scenarios].
   Activate when you observe [specific symptoms, error patterns, or conditions].
   This skill [what it does] by [how it does it] to [outcome].
+metadata:
+  author: github-username
+  version: "1.0.0"
 ---
 ```
+
+The `metadata` block with `author` and `version` fields is required. Initial version should be `"1.0.0"`.
 
 ### Skill README.md Structure
 
@@ -85,8 +90,15 @@ Every skill must include a `CHANGELOG.md` tracking version history. Use semantic
 
 Every skill should include evaluation tests using the [Agent Skill Eval](https://github.com/aws-samples/sample-agent-skill-eval) framework:
 
-- Add a `.skilleval.yaml` configuration file in the skill root
-- Add evaluation queries and benchmarks in the `evals/` directory
+- Add a `.skilleval.yaml` configuration file in the skill root with the following content:
+  ```yaml
+  audit:
+    ignore:
+      - STR-016    # README alongside SKILL.md is intentional
+  ```
+- Add evaluation queries and benchmarks in the `evals/` directory:
+  - `evals.json` — functional tests (scenarios with assertions)
+  - `eval_queries.json` — trigger tests (only `"should_trigger": false` tests are required; activation is implied by successful functional tests)
 - Tests should cover both audit (structural quality) and functional (runtime behavior) evaluations
 - Skills should achieve a passing score before being merged
 - Run evaluations locally and test with DevOps Agent before submitting changes
