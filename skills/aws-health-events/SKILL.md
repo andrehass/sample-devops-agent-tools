@@ -44,7 +44,7 @@ configurable time period.
 
 ## Prerequisites
 
-- The account must have an **AWS Business Support**, **Enterprise Support**, or
+- The account must have an **AWS Business Support+**, **Enterprise Support**, or
   **Unified Operations** support plan to access the AWS Health API.
 - The agent must have permissions to call the following IAM actions:
   - `health:DescribeEvents`

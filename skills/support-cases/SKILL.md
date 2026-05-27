@@ -31,8 +31,8 @@ that may contain relevant context, similar symptoms, or proven remediation steps
 
 ## Prerequisites
 
-- The AWS account must have a Business, Enterprise On-Ramp, or Enterprise
-  Support plan (required for the AWS Support API).
+- The AWS account must have a Business Support+, Enterprise Support, or
+  Unified Operations plan (required for the AWS Support API).
 - The agent must have permissions to call `support:DescribeCases` and
   `support:DescribeCommunications` in the target account.
 - Support case data is available for 24 months after creation. Cases older than

@@ -16,7 +16,7 @@ When an operational incident occurs, historical support cases often contain valu
 
 ## Prerequisites
 
-- AWS account with Business, Enterprise On-Ramp, or Enterprise Support plan
+- AWS account with Business Support+, Enterprise Support, or Unified Operations plan
 - Agent permissions for `support:DescribeCases` and `support:DescribeCommunications`
 
 ## Limitations

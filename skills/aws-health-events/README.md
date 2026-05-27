@@ -17,7 +17,7 @@ When an operational incident occurs, AWS Health events provide critical visibili
 ## Prerequisites
 
 - IAM permissions for `health:Describe*` actions (`health:DescribeEvents`, `health:DescribeEventDetails`, `health:DescribeAffectedEntities`, `health:DescribeEventTypes`)
-- AWS Health API access (requires AWS Business Support, Enterprise Support, or Unified Operations support plan)
+- AWS Health API access (requires AWS Business Support+, Enterprise Support, or Unified Operations support plan)
 
 ## Limitations
 
