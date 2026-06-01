@@ -5,7 +5,7 @@
 
 Open-source skills for [AWS DevOps Agent](https://aws.amazon.com/devops-agent/) that extend its capabilities for incident response, root cause analysis, and operational troubleshooting.
 
-Each skill provides domain-specific knowledge, decision trees, and step-by-step runbooks that the agent follows during investigations. Use them as-is to enhance your agent, or as templates for writing your own custom skills.
+Each skill provides domain-specific knowledge, decision trees, and step-by-step runbooks that the agent follows during investigations. Use them as-is to enhance your agent, or as templates for writing your own custom skills. All skills were tested using [Agent Skill Eval](https://github.com/aws-samples/sample-agent-skill-eval), and the tests reports are available in each skill's `evals/` directory.
 
 > **Note:** If you intend to deploy these skills in production, start with a non-production environment first.
 
