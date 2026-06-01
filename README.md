@@ -71,6 +71,7 @@ Want to create custom skills for your operational workflows? See the [AWS DevOps
 
 Key principles for effective skills (see also the [Agent Skills best practices](https://agentskills.io/skill-creation/best-practices)):
 
+- Decide which agent types in DevOps Agent are relevant for your skill
 - Write a description that specifies when and why the skill should activate — include specific symptoms, services, or error patterns that trigger it
 - Ground instructions in real expertise — specific API patterns, edge cases, and project conventions, not generic advice
 - Keep `SKILL.md` focused and under 500 lines; move detailed reference material to `references/`
@@ -79,7 +80,7 @@ Key principles for effective skills (see also the [Agent Skills best practices](
 - Include decision trees for branching scenarios and checklists for multi-step workflows
 - Provide defaults rather than menus — pick a recommended approach and mention alternatives briefly
 - Include a gotchas section for non-obvious facts that defy reasonable assumptions
-- Test with the [Agent Skill Eval](https://github.com/aws-samples/sample-agent-skill-eval) framework
+- Test with the [Agent Skill Eval](https://github.com/aws-samples/sample-agent-skill-eval) framework, and manually using the DevOps Agent web app, without skill and with skill
 
 ## Contributing
 
