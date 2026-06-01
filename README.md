@@ -5,8 +5,11 @@
 
 Open-source skills for [AWS DevOps Agent](https://aws.amazon.com/devops-agent/) that extend its capabilities for incident response, root cause analysis, and operational troubleshooting.
 
-Each skill provides domain-specific knowledge, decision trees, and step-by-step runbooks that the agent follows during investigations. Use them as-is to enhance your agent, or as templates for writing your own custom skills.  
-All skills were tested using [Agent Skill Eval](https://github.com/aws-samples/sample-agent-skill-eval) and manually in DevOps Agent web app, for functionality without skill and with skill, and for effective triggering. The tests reports are available in each skill's `evals/` directory.
+Each skill provides domain-specific knowledge, decision trees, and step-by-step runbooks that the agent follows during investigations. Use them as-is to enhance your agent, or as templates for writing your own custom skills.
+
+All skills were tested using [Agent Skill Eval](https://github.com/aws-samples/sample-agent-skill-eval) and manually in DevOps Agent web app, for functionality without skill and with skill, and for effective triggering. The tests reports are available in each skill's `evals/` directory.  
+
+> **Note:** [Agent Skill Eval currently uses Claude CLI](https://github.com/aws-samples/sample-agent-skill-eval#all-commands) for `functional`, `trigger`, `compare` and `report` tests. We're researching ways for local automated testing using AWS DevOps Agent APIs. We complement the current automated testing with manual tests using DevOps Agent web app.
 
 > **Note:** If you intend to deploy these skills in production, start with a non-production environment first.
 
@@ -16,11 +19,10 @@ AWS DevOps Agent skills are structured instruction sets that teach the agent how
 
 Skills enable DevOps Agent to:
 
-- Investigate incidents using domain-specific runbooks and decision trees
-- Query AWS APIs (Support, Health, EKS, CloudWatch) with targeted filtering strategies
-- Correlate findings across multiple data sources during root cause analysis
-- Surface historical patterns, prior resolutions, and recurring issues
-- Provide structured recommendations based on best practices
+- Specialize with investigation procedures, best practices, and organizational knowledge specific to your infrastructure
+- Automatically load relevant instructions during investigations, eliminating repetitive guidance
+- Compose multiple skills for end-to-end investigation workflows (e.g., retrieving deployments from your CI/CD pipeline and searching code repositories)
+- Guide the agent in using your custom MCP server tools effectively for infrastructure-specific workflows
 
 ## Available Skills
 
@@ -67,12 +69,16 @@ The `SKILL.md`, `references/`, and `assets/` directories are what AWS DevOps Age
 
 Want to create custom skills for your operational workflows? See the [AWS DevOps Agent skills documentation](https://docs.aws.amazon.com/devopsagent/latest/userguide/about-aws-devops-agent-devops-agent-skills.html) for the full guide, or use the skills in this repository as templates.
 
-Key principles for effective skills:
+Key principles for effective skills (see also the [Agent Skills best practices](https://agentskills.io/skill-creation/best-practices)):
 
-- Write step-by-step instructions with clear decision trees
-- Include specific AWS API calls and CLI commands the agent should use
-- Define filtering strategies and relevance scoring criteria
-- Provide expected outputs and success criteria
+- Write a description that specifies when and why the skill should activate — include specific symptoms, services, or error patterns that trigger it
+- Ground instructions in real expertise — specific API patterns, edge cases, and project conventions, not generic advice
+- Keep `SKILL.md` focused and under 500 lines; move detailed reference material to `references/`
+- Add what the agent wouldn't know on its own — omit explanations of general concepts
+- Favor step-by-step procedures over declarative statements so the approach generalizes across tasks
+- Include decision trees for branching scenarios and checklists for multi-step workflows
+- Provide defaults rather than menus — pick a recommended approach and mention alternatives briefly
+- Include a gotchas section for non-obvious facts that defy reasonable assumptions
 - Test with the [Agent Skill Eval](https://github.com/aws-samples/sample-agent-skill-eval) framework
 
 ## Contributing
