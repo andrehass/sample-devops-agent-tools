@@ -9,7 +9,7 @@ Each skill provides domain-specific knowledge, decision trees, and step-by-step 
 
 All skills were tested using [Agent Skill Eval](https://github.com/aws-samples/sample-agent-skill-eval) and manually in DevOps Agent web app, for functionality without skill and with skill, and for effective triggering. The tests reports are available in each skill's `evals/` directory.  
 
-> **Note:** [Agent Skill Eval currently uses Claude CLI](https://github.com/aws-samples/sample-agent-skill-eval#all-commands) for `functional`, `trigger`, `compare` and `report` tests. We're researching ways for local automated testing using AWS DevOps Agent APIs. We complement the current automated testing with manual tests using DevOps Agent web app.
+> **Note:** [Agent Skill Eval currently uses Claude CLI](https://github.com/aws-samples/sample-agent-skill-eval#all-commands) for `functional`, `trigger`, `compare` and `report` tests. We're researching ways for local automated testing using AWS DevOps Agent APIs. We complement the current Agent Skill Eval automated testing with manual tests using DevOps Agent web app.
 
 > **Note:** If you intend to deploy these skills in production, start with a non-production environment first.
 
