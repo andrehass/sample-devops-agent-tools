@@ -12,6 +12,7 @@ metadata:
   version: "1.0.0"
   aws-devops-agent-skills.agent-types: "Chat tasks, Evaluation"
   aws-devops-agent-skills.aws-services: "Amazon RDS"
+  aws-devops-agent-skills.technical-domains: "Databases"
 ---
 
 # RDS / Aurora Operational Review

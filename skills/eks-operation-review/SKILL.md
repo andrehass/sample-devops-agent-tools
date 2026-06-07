@@ -11,6 +11,7 @@ metadata:
   version: "1.0.0"
   aws-devops-agent-skills.agent-types: "Chat tasks, Evaluation"
   aws-devops-agent-skills.aws-services: "Amazon EKS"
+  aws-devops-agent-skills.technical-domains: "Containers"
 ---
 
 # EKS Operational Review

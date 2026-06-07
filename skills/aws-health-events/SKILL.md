@@ -17,6 +17,7 @@ metadata:
   version: "1.0.0"
   aws-devops-agent-skills.agent-types: "Chat tasks, Incident RCA"
   aws-devops-agent-skills.aws-services: "AWS Health"
+  aws-devops-agent-skills.technical-domains: "Operations"
 ---
 
 # AWS Health Event Review
