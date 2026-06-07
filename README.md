@@ -17,7 +17,7 @@ See the [LICENSE](LICENSE) file for terms of use.
 
 ---
 
-Each skill provides domain-specific knowledge, decision trees, and step-by-step runbooks that the agent follows during investigations. Use them as-is to enhance your agent, or as templates for writing your own custom skills.
+Each skill provides domain-specific knowledge, decision trees, and step-by-step runbooks that the agent follows during investigations. Use them as-is to enhance AWS DevOps agent, or as templates for writing your own custom skills.
 
 All skills were tested using [Agent Skill Eval](https://github.com/aws-samples/sample-agent-skill-eval) and manually in DevOps Agent web app, for functionality without skill and with skill, and for effective triggering. The tests reports are available in each skill's `evals/` directory.
 
