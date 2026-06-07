@@ -385,7 +385,7 @@ codes from the references document (e.g., `ELASTICLOADBALANCING` for ELB,
 | Missing `health:Describe*` permissions | Report the missing permissions and specify the required IAM actions: `health:DescribeEvents`, `health:DescribeEventDetails`, `health:DescribeAffectedEntities`, `health:DescribeEventTypes`. Provide the IAM policy snippet needed. |
 | Throttling (HTTP 429) | Retry with exponential backoff: wait 1s → 2s → 4s (max 3 retries). If still throttled after 3 retries, report that the Health API is currently rate-limited and recommend trying again shortly. |
 | Service error (HTTP 5xx) | Report the error code and recommend the operator check the AWS Health Dashboard directly as a fallback. |
-| Timeout (30 seconds) | Abort the request and report a timeout error. Suggest the operator check the Health Dashboard directly or retry with narrower filters. |
+| Timeout (30 seconds) | Cancel the request and report a timeout error. Suggest the operator check the Health Dashboard directly or retry with narrower filters. |
 | Zero events found | Report that no events matched the specified filters. Confirm the search parameters used. Suggest broadening the search or checking other investigation paths. |
 | Invalid time range (start > end) | Report the invalid time range error. Ask the operator to provide corrected timestamps. |
 | DescribeEventDetails failedSet | Report the failed event ARNs and error messages. Continue processing events from the successfulSet. |
