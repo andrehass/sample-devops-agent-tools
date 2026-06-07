@@ -26,6 +26,7 @@ Start with the SKILL.md, as well as `references/` and and `assets/` if needed.
 4. Make sure the skill's formatter includes a `metadata` block with `version` and `author` fields
 5. Document your skill in a `README.md` file inside your skill's directory
 6. Create a `CHANGELOG.md` file for your skill, inside your skill's directory
+7. Include a non-production disclaimer in your skill's README. Add a note stating that the skill is sample code, not intended for production use without additional review and testing, and that users should validate in a non-production environment first
 
 ### Test Your Skill
 
