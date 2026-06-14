@@ -30,7 +30,7 @@ When an operational incident occurs, AWS Health events provide critical visibili
 This skill is used by the following agent types:
 
 - **Chat tasks** — conversational health event lookup, reporting, and analysis
-- **Incident RCA** — automated root cause analysis during active incidents
+- **Incident RCA** — root cause analysis during active incidents
 
 ## Uploading to AWS DevOps Agent
 

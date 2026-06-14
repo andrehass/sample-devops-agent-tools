@@ -28,7 +28,7 @@ When an operational incident occurs, historical support cases often contain valu
 This skill is used by the following agent types:
 
 - **Chat tasks** — conversational support case lookup and analysis
-- **Incident RCA** — automated root cause analysis during active incidents
+- **Incident RCA** — root cause analysis during active incidents
 
 ## Uploading to AWS DevOps Agent
 
