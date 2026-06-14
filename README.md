@@ -41,6 +41,7 @@ Skills enable DevOps Agent to:
 | [eks-operation-review](skills/eks-operation-review/) | Performs comprehensive Amazon EKS operational reviews aligned with the AWS EKS Best Practices Guide covering security, reliability, networking, and scalability | Chat tasks, Prevention | [yakiratz-aws](https://github.com/yakiratz-aws) | [README](skills/eks-operation-review/README.md) |
 | [rds-operation-review](skills/rds-operation-review/) | Performs comprehensive Amazon RDS operational reviews | Chat tasks, Prevention | [yakiratz-aws](https://github.com/yakiratz-aws) | [README](skills/rds-operation-review/README.md) |
 | [crm-production-investigation-guidelines](skills/crm-production-investigation-guidelines/) | **Sample skill** demonstrating how to write investigation guidelines for the Incident Triage agent type using a fictional CRM application | Incident Triage | [jossaiaws](https://github.com/jossaiaws) | [README](skills/crm-production-investigation-guidelines/README.md) |
+| [skip-scheduled-maintenance](skills/skip-scheduled-maintenance/) | **Sample skill** demonstrating how to skip low-priority incidents during a scheduled maintenance window for the Incident Triage agent type | Incident Triage | [dgorin6](https://github.com/dgorin6) | [README](skills/skip-scheduled-maintenance/README.md) |
 
 ## Getting Started
 

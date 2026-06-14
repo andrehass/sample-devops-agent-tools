@@ -32,7 +32,7 @@ When a production incident occurs, investigation agents might need application-s
 
 This skill is designed for:
 
-- **Incident Triage** — automated incident investigation and root cause analysis triggered by alert webhooks
+- **Incident Triage** — initial incident assessment and investigation
 
 ## Uploading to AWS DevOps Agent
 
