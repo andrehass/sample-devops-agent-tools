@@ -2,11 +2,11 @@
 
 ## Purpose
 
-This custom agent generates a weekly summary report of all AWS Support cases opened, updated, or resolved during a specified time period. It provides operations teams with a consolidated view of support activity, recurring patterns, and items requiring follow-up.
+This custom agent generates a report of all AWS Support cases during a specified time period (last 60 days by default, unless otherwise requested by a user prompt). It provides operations teams with a consolidated view of support activity, recurring patterns, and items requiring follow-up.
 
 ## Key Capabilities
 
-- Retrieves all AWS Support cases (open and resolved) for a configurable reporting period
+- Retrieves all AWS Support cases for a configurable reporting period
 - Groups cases by service, severity, and status
 - Identifies recurring patterns and escalation trends
 - Highlights open cases requiring attention (critical/urgent, long-running)
@@ -14,66 +14,26 @@ This custom agent generates a weekly summary report of all AWS Support cases ope
 
 ## Prerequisites
 
-- An AWS DevOps Agent space with the AWS account associated
-- AWS Support API access (Business, Enterprise On-Ramp, or Enterprise support plan)
+- An AWS DevOps Agent space
+- AWS Support API access (Business Support+, Enterprise Support, or Unified Operations plan)
 - IAM permissions for `support:DescribeCases` and `support:DescribeCommunications`
-- The **support-cases** skill uploaded to your Agent Space
+- The [support-cases skill](../../skills/support-cases/) uploaded to your Agent Space. Important note: for the skill to be used by the custom agent, choose "All agents" in the "Agent Type" field when importing the skill, even that the skill's README file instructs to choose specific agent types
 
-## Configuration
+## Creating the Agent
 
-### Creating the Agent
+1. In the DevOps Agent web app, go to the "Agents" menu (on the bottom left pane)
+2. Click "Create agent" (on the right side), then on the new menu that popped up, click "Form" (the left-most option)
+3. In the "Name" field, use "support-cases-report"
+4. Copy the content of the "SYSTEM_PROMPT.md" file from this directory, and paste it into the "System prompt" field in the custom agent creation form
+5. In the "Skills" drop-down list, select the "support-cases" skill, and click "Create agent"
+6. Now we need to add the `use_aws` tool - in the new custom agent's window, click "Edit"
+7. In the new poppoed up window, select "Chat". A new chat will start on the left side. Wait for DevOps Agent to finish thinking, and it'll ask you what would you like to change
+8. Type "Add the use_aws tool to this custom agent". Once the chat is finished, verify in the custom agent's page that `use_aws` is shown under "Tools" for this custom agent
 
-1. In the DevOps Agent console, go to **Custom Agents** and choose **Create agent**
-2. Configure the agent with:
+## Executing the Agent
 
-| Setting | Value |
-|---------|-------|
-| **Name** | `Support Cases Weekly Report` |
-| **System prompt** | Copy contents of [`SYSTEM_PROMPT.md`](./SYSTEM_PROMPT.md) |
-| **Tools** | AWS Support (must include `describe-cases` capability) |
-| **Skills** | `support-cases` |
-
-### Scheduling (Recommended)
-
-Set up a weekly schedule to run this agent automatically:
-
-- **Frequency**: Weekly (e.g., every Monday at 09:00 UTC)
-- **Run prompt** (optional): Use a custom prompt to override defaults, e.g.:
-  - `"Generate the report for the past 14 days"` — for a biweekly cadence
-  - `"Focus only on critical and urgent cases"` — for an executive summary
-
-### On-Demand Execution
-
-Run manually anytime from the Custom Agents page or via Chat:
-
-> "Run my Support Cases Weekly Report agent"
-
-You can also pass a custom prompt to override the time window:
-
-> "Run my Support Cases Weekly Report agent for the past 30 days"
-
-## Output
-
-The agent produces a Markdown artifact with:
-
-- Executive summary
-- Cases by severity (opened, resolved, still open)
-- Cases by service with most common issues
-- Open cases requiring attention
-- Resolved cases with resolution times
-- Recurring patterns and trends
-- Actionable recommendations
-
-The artifact is persisted on the **Artifacts** page in the DevOps Agent console.
-
-## Customization
-
-You can tailor this agent by editing the system prompt:
-
-- **Change the default time window**: Modify "past 7 days" to any period
-- **Add team-specific sections**: Include account IDs, service filters, or team ownership mapping
-- **Adjust verbosity**: For large environments, configure the agent to summarize normal/low cases and detail only critical/urgent ones
-- **Add integrations**: Extend the prompt to post the report to Slack, create a Jira ticket, or send via email (requires additional tools)
+You can execute the custom agent on-demand from the custom agent page, on schedule, or using chat. Follow the [Executing custom agents guide](https://docs.aws.amazon.com/devopsagent/latest/userguide/custom-agents-executing-custom-agents.html) for more information. You can also run it using custom prompt (for example, ask it to produce a report for the last 90 days instead of the default 60 days).  
+Once finshed, the artifact is persisted on the **Artifacts** page in the DevOps Agent web app.
 
 ## Related
 
