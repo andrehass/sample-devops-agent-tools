@@ -49,6 +49,8 @@ Skills enable DevOps Agent to:
 
 ### 1. Clone the repository
 
+Only needed if you plan to upload a skill as a zip file (Option B below) or via the Asset API (Option C below). If you're importing directly from GitHub (Option A), you can skip this step.
+
 ```bash
 git clone https://github.com/aws-samples/sample-code-for-devops-agent-skills.git
 cd sample-code-for-devops-agent-skills
@@ -60,7 +62,7 @@ Browse the skills table above and read the skill's `README.md` for details on it
 
 ### 3. Upload to AWS DevOps Agent
 
-You can add skills to your Agent Space in two ways:
+You can add skills to your Agent Space in three ways:
 
 **Option A: Import from GitHub (recommended)**
 
