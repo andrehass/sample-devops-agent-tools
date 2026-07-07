@@ -19,6 +19,10 @@ site/
 docs/javascripts/skills-data.json
 docs/skills/*.md
 !docs/skills/index.md
+# Generated at build time by agents_catalog.py hook
+docs/javascripts/agents-data.json
+docs/custom-agents/*.md
+!docs/custom-agents/index.md
 
 # Claude
 .claude/*
