@@ -24,7 +24,20 @@ Amazon Redshift (provisioned clusters / Serverless workgroups)
 
 Follow these steps **in order** — each one depends on the previous:
 
-1. **Deploy the MCP server** ([Step 2](#step-2--deploy-the-redshift-mcp-server) below) — produces an API Gateway endpoint.
+1. **Deploy the MCP server** ([Step 2](#step-2--deploy-the-redshift-mcp-server) below) — produces an API Gateway endpoint. Quickest path (AWS SAM, no prompts):
+
+   ```bash
+   cd skills/redshift-support-specialist/deployment/sam-app
+   sam build
+   sam deploy \
+     --stack-name redshift-mcp \
+     --capabilities CAPABILITY_NAMED_IAM \
+     --resolve-s3 \
+     --region us-east-1 \
+     --no-confirm-changeset \
+     --no-fail-on-empty-changeset
+   ```
+
 2. **Test the deployment** ([Step 2](#test-the-deployment) below) — confirm the endpoint actually works before wiring it into DevOps Agent.
 3. **Connect the MCP server to your Agent Space** ([Step 3](#step-3--connect-the-mcp-server-to-your-agent-space) below) — register it and allowlist its tools.
 4. **Upload this skill** ([Uploading to AWS DevOps Agent](#uploading-to-aws-devops-agent) below).
@@ -317,8 +330,10 @@ Nothing to do — `uvx awslabs.redshift-mcp-server@latest` re-resolves the lates
 **SAM:**
 ```bash
 cd skills/redshift-support-specialist/deployment/sam-app
-sam delete --stack-name <stack-name>
+sam delete --stack-name redshift-mcp --region us-east-1
 ```
+
+Replace `redshift-mcp` and `us-east-1` with the stack name and region you deployed with. Add `--profile <name>` if you're not using your default AWS credentials. `sam delete` prompts for confirmation, then removes the CloudFormation stack (Lambda function, API Gateway REST API, IAM roles) and the SAM-managed S3 deployment artifacts for this stack.
 
 **Plain CLI:**
 ```bash
