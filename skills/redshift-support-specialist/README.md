@@ -78,38 +78,11 @@ After a successful deploy, SAM prints the stack outputs:
 | `RedshiftMcpApiUrl` | The endpoint to register with AWS DevOps Agent's SigV4 MCP-server capability provider (Service Name = `execute-api`). Backed by API Gateway, IAM/SigV4 authorized. | `https://<api-id>.execute-api.<region>.amazonaws.com/Prod/mcp` |
 | `DevOpsAgentRoleArn` | ARN of the IAM role created for AWS DevOps Agent — only present when `CreateDevOpsAgentRole` was `true`. Use this when connecting the MCP server to your Agent Space capability provider. | `arn:aws:iam::<account-id>:role/DevOpsAgentRole-Redshift-support-specialist` |
 | `RedshiftMcpFunctionArn` | ARN of the Redshift MCP Lambda function. | `arn:aws:lambda:<region>:<account-id>:function:redshift-mcp-redshift-mcp` |
-| `GrantInvokeCommand` | A ready-to-run `aws iam put-role-policy` command (pre-filled with your actual API ID and function ARN) to grant `execute-api:Invoke` access to an additional caller role — see below. | See command below. |
-| `CallerRoleGranted` | The role (if any) granted `execute-api:Invoke` via the `CallerRoleArn` parameter at deploy time. Empty if `CallerRoleArn` wasn't provided. | *(empty, or a role ARN)* |
-
-`GrantInvokeCommand`'s value looks like this (replace `<ROLE_NAME>` with the caller role to grant):
-
-```bash
-aws iam put-role-policy \
-  --role-name <ROLE_NAME> \
-  --policy-name InvokeRedshiftMcpApi \
-  --policy-document '{
-    "Version": "2012-10-17",
-    "Statement": [
-      {
-        "Effect": "Allow",
-        "Action": "execute-api:Invoke",
-        "Resource": "arn:aws:execute-api:<region>:<account-id>:<api-id>/*/POST/mcp"
-      },
-      {
-        "Effect": "Allow",
-        "Action": "lambda:InvokeFunction",
-        "Resource": "arn:aws:lambda:<region>:<account-id>:function:redshift-mcp-redshift-mcp"
-      }
-    ]
-  }'
-```
 
 What you'll actually use from this:
 
 - **`RedshiftMcpApiUrl`** — the endpoint you'll register with AWS DevOps Agent in Step 2 (Service Name = `execute-api`).
 - **`DevOpsAgentRoleArn`** — only appears if you deployed with `CreateDevOpsAgentRole=true` (see below). You'll use this in Step 2 as the IAM role — it already has invoke access to the API, no manual grant needed.
-
-`GrantInvokeCommand`/`CallerRoleGranted` only matter if you need to grant invoke access to an *additional* caller role beyond the one created above — see [`deployment/README.md`](deployment/README.md#grant-invoke-access-to-a-caller) if that applies to you.
 
 See [`deployment/sam-app/README.md`](deployment/sam-app/README.md) for the full parameter reference, and for an interactive `sam deploy --guided` alternative if you'd rather be prompted for each value.
 
