@@ -20,12 +20,12 @@ The skill's own `SKILL.md` lets the user choose between background mode and step
 
 - An AWS DevOps Agent space
 - The [redshift-support-specialist skill](../../skills/redshift-support-specialist/) uploaded to your Agent Space. Important note: for the skill to be used by the custom agent, choose "All agents" in the "Agent Type" field when importing the skill, even though the skill's README instructs to choose "Chat"
-- The `awslabs.redshift-mcp-server` MCP server deployed and connected as a capability provider — see the skill's [Step 2 — Deploy the Redshift MCP Server](../../skills/redshift-support-specialist/README.md#step-2--deploy-the-redshift-mcp-server) and [Step 3 — Connect the MCP server to your Agent Space](../../skills/redshift-support-specialist/README.md#step-3--connect-the-mcp-server-to-your-agent-space) sections
+- The `awslabs.redshift-mcp-server` MCP server deployed and connected as a capability provider — see the skill's [Step 1 — MCP Server Deployment](../../skills/redshift-support-specialist/README.md#step-1--mcp-server-deployment) and [Step 2 — Connect the MCP server to your Agent Space](../../skills/redshift-support-specialist/README.md#step-2--connect-the-mcp-server-to-your-agent-space) sections
 - No AWS CLI or CloudWatch access is required for the agent itself; all Redshift access goes through the connected MCP server
 
 ## Creating the Agent
 
-The MCP server must already be registered as an account-level capability provider and connected to your Agent Space before creating this agent — see [Prerequisites](#prerequisites) above and the skill's [Step 3 — Connect the MCP server to your Agent Space](../../skills/redshift-support-specialist/README.md#step-3--connect-the-mcp-server-to-your-agent-space) steps.
+The MCP server must already be registered as an account-level capability provider and connected to your Agent Space before creating this agent — see [Prerequisites](#prerequisites) above and the skill's [Step 2 — Connect the MCP server to your Agent Space](../../skills/redshift-support-specialist/README.md#step-2--connect-the-mcp-server-to-your-agent-space) steps.
 
 1. In the DevOps Agent web app, go to the "Agents" page.
 2. In the "Custom Agents" section, click "Create agent".

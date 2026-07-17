@@ -1,6 +1,6 @@
 # Redshift MCP Server — Serverless Deployment (Lambda, no ECR)
 
-Reference material for deploying the Redshift MCP server. For the step-by-step setup flow (which this supports), see the main skill README's [Step 2 — Deploy the Redshift MCP Server](../README.md#step-2--deploy-the-redshift-mcp-server).
+Reference material for deploying the Redshift MCP server. For the step-by-step setup flow (which this supports), see the main skill README's [Step 1 — MCP Server Deployment](../README.md#step-1--mcp-server-deployment).
 
 ## Files in this directory
 
