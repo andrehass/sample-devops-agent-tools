@@ -225,41 +225,6 @@ Once the MCP server is deployed and you've confirmed it works (Step 1's **Test t
 
 > Full reference: [Connecting MCP Servers](https://docs.aws.amazon.com/devopsagent/latest/userguide/configuring-integrations-and-knowledge-connecting-mcp-servers.html)
 
-## Architecture
-
-```text
-Caller (SigV4-signed request, service=execute-api)
-                       │
-                       ▼
-API Gateway REST API
-(AWS_IAM auth, /mcp)
-                       │
-                       ▼
-Lambda execution environment (arm64, Python 3.13 runtime)
-  ├─ Lambda Web Adapter (layer, /opt/extensions/lambda-adapter)
-  │     forwards HTTP traffic to 127.0.0.1:8000
-  └─ run.sh (function handler)
-        └─ mcp-proxy --port=8000 --stateless --pass-environment -- \
-             uvx awslabs.redshift-mcp-server@latest
-                 └─ talks to Redshift via the Redshift Data API (boto3)
-```
-
-## How the Pieces Fit Together
-
-```text
-AWS DevOps Agent Chat
-        |  (natural language: "why is this Redshift query slow?")
-        v
-This skill: redshift-support-specialist
-        |  (calls the 6 MCP tools: list_clusters, list_databases,
-        |   list_schemas, list_tables, list_columns, execute_query)
-        v
-Redshift MCP Server on Lambda, behind API Gateway (AWS_IAM auth)   (deployment/)
-        |  (Redshift Data API -- no VPC, no container image, no ECR)
-        v
-Amazon Redshift (provisioned clusters / Serverless workgroups)
-```
-
 ## Limitations
 
 - **No AWS CLI or CloudWatch access.** Every Redshift interaction goes through the six MCP server tools only (`list_clusters`, `list_databases`, `list_schemas`, `list_tables`, `list_columns`, `execute_query`). Checks that require CloudWatch metrics/alarms, snapshot inventory, SSL/audit-log/parameter-group configuration, or Reserved Instance coverage are reported as "Not Available" rather than guessed — see Capabilities 4 and 5 in `SKILL.md`.
