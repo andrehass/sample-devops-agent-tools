@@ -17,6 +17,16 @@ Amazon Redshift domain expertise for [AWS DevOps Agent](https://docs.aws.amazon.
 - **Incident detection guidance** — recommended CloudWatch alarm set for provisioned clusters and Serverless workgroups.
 - **Cost optimization** — node/RPU right-sizing and serverless migration analysis using live table and workload data.
 
+## Setup Overview
+
+Follow these steps **in order** — each one depends on the previous:
+
+1. **MCP Server Deployment** ([Step 2](#step-2--deploy-the-redshift-mcp-server) below) — deploy the Redshift MCP server (AWS SAM or plain CLI) and confirm it works.
+2. **Connect the MCP server to your Agent Space** ([Step 3](#step-3--connect-the-mcp-server-to-your-agent-space) below) — register it and allowlist its tools.
+3. **Upload this skill** ([Step 4](#step-4--uploading-to-aws-devops-agent) below).
+4. **(Optional) Create the custom agent** ([Create a Custom Agent](#optional-create-a-custom-agent) below) — a dedicated agent pre-wired to this skill.
+5. **Use it** ([How to Use This Skill](#how-to-use-this-skill) below) — ask the DevOps Agent things like "run a health check on my Redshift cluster" in Chat.
+
 ## Prerequisites
 
 ### Step 1 — An AWS DevOps Agent Space with the target AWS account
@@ -27,28 +37,7 @@ You need an existing [Agent Space](https://docs.aws.amazon.com/devopsagent/lates
 
 This skill requires the `awslabs.redshift-mcp-server` MCP server to be running and reachable. It exposes exactly six tools this skill relies on: `list_clusters`, `list_databases`, `list_schemas`, `list_tables`, `list_columns`, and `execute_query`.
 
-This runs the **standard, unmodified** `awslabs.redshift-mcp-server@latest` PyPI package on AWS Lambda, fronted by an **API Gateway REST API** secured with AWS IAM (SigV4) authorization.
-
-API Gateway sits in front of the Lambda function and exposes a single `/mcp` endpoint. Every request must be signed with AWS SigV4 for the `execute-api` service, from a principal that's been explicitly granted `execute-api:Invoke` on that endpoint (see **Grant invoke access to a caller** below). API Gateway validates the signature and the caller's IAM permissions before the request ever reaches the Lambda function, then forwards it into the Lambda execution environment where `mcp-proxy` bridges the HTTP request to the underlying MCP server process (see **Architecture** below). This is the endpoint you register with AWS DevOps Agent in Step 3.
-
-No EC2 instance, no load balancer, no VPC networking, and no container registry (ECR) to maintain.
-
-#### Why this approach
-
-- **No forked server code.** Everything runs through [`mcp-proxy`](https://github.com/sparfenyuk/mcp-proxy), a generic stdio↔streamable-HTTP bridge, which spawns the exact command from the standard stdio MCP config:
-  ```json
-  {
-    "mcpServers": {
-      "awslabs.redshift-mcp-server": {
-        "command": "uvx",
-        "args": ["awslabs.redshift-mcp-server@latest"]
-      }
-    }
-  }
-  ```
-  `uvx` always resolves the latest published PyPI release on cold start — no separate fork to keep in sync with upstream security fixes.
-- **No container image, no ECR.** Packaged as a plain Lambda `.zip` deployment, using the public [AWS Lambda Web Adapter](https://github.com/aws/aws-lambda-web-adapter) **layer** (not an image) so the HTTP server `mcp-proxy` exposes runs inside Lambda's request/response model.
-- **No VPC required.** The MCP server talks to Redshift only via the Redshift Data API (`redshift-data:ExecuteStatement` etc.) — plain AWS API calls, not a database socket connection.
+Deployment runs the **standard, unmodified** `awslabs.redshift-mcp-server@latest` PyPI package on AWS Lambda, fronted by an **API Gateway REST API** secured with AWS IAM (SigV4) authorization — no EC2, no load balancer, no VPC, no container registry. This is the endpoint you register with AWS DevOps Agent in Step 3. For the full architecture rationale, see [`deployment/README.md`](deployment/README.md#why-this-approach).
 
 #### Two ways to deploy
 
@@ -70,42 +59,44 @@ sam deploy \
   --no-fail-on-empty-changeset
 ```
 
-After a successful deploy, SAM prints the stack outputs. Example (values shown are illustrative — yours will have your own account ID, region, and generated API/function names):
+After a successful deploy, SAM prints the stack outputs:
 
-```text
-Key                 DevOpsAgentRoleArn
-Description         ARN of the IAM role created for AWS DevOps Agent (only present when
-CreateDevOpsAgentRole was 'true'). Use this ARN when connecting the MCP server
-to your Agent Space capability provider.
-Value               arn:aws:iam::<account-id>:role/DevOpsAgentRole-Redshift-support-specialist
+| Output | Description | Example value |
+|---|---|---|
+| `RedshiftMcpApiUrl` | The endpoint to register with AWS DevOps Agent's SigV4 MCP-server capability provider (Service Name = `execute-api`). Backed by API Gateway, IAM/SigV4 authorized. | `https://<api-id>.execute-api.<region>.amazonaws.com/Prod/mcp` |
+| `DevOpsAgentRoleArn` | ARN of the IAM role created for AWS DevOps Agent — only present when `CreateDevOpsAgentRole` was `true`. Use this when connecting the MCP server to your Agent Space capability provider. | `arn:aws:iam::<account-id>:role/DevOpsAgentRole-Redshift-support-specialist` |
+| `RedshiftMcpFunctionArn` | ARN of the Redshift MCP Lambda function. | `arn:aws:lambda:<region>:<account-id>:function:redshift-mcp-redshift-mcp` |
+| `GrantInvokeCommand` | A ready-to-run `aws iam put-role-policy` command (pre-filled with your actual API ID and function ARN) to grant `execute-api:Invoke` access to an additional caller role — see below. | See command below. |
+| `CallerRoleGranted` | The role (if any) granted `execute-api:Invoke` via the `CallerRoleArn` parameter at deploy time. Empty if `CallerRoleArn` wasn't provided. | *(empty, or a role ARN)* |
 
-Key                 RedshiftMcpFunctionArn
-Description         ARN of the Redshift MCP Lambda function.
-Value               arn:aws:lambda:<region>:<account-id>:function:redshift-mcp-redshift-mcp
+`GrantInvokeCommand`'s value looks like this (replace `<ROLE_NAME>` with the caller role to grant):
 
-Key                 RedshiftMcpApiUrl
-Description         The endpoint to register with AWS DevOps Agent's SigV4 MCP-server
-capability provider (Service Name = execute-api). Backed by API Gateway,
-IAM/SigV4 authorized.
-Value               https://<api-id>.execute-api.<region>.amazonaws.com/Prod/mcp
-
-Key                 GrantInvokeCommand
-Description         If CallerRoleArn was provided, that role already has invoke access
-(see CallerRoleGranted below). Use this command to grant execute-api:Invoke
-access to any additional caller role. Replace <ACCOUNT_ID> and <ROLE_NAME>.
-Value               aws iam put-role-policy --role-name <ROLE_NAME> --policy-name InvokeRedshiftMcpApi --policy-document '{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Action":"execute-api:Invoke","Resource":"arn:aws:execute-api:<region>:<account-id>:<api-id>/*/POST/mcp"},{"Effect":"Allow","Action":"lambda:InvokeFunction","Resource":"arn:aws:lambda:<region>:<account-id>:function:redshift-mcp-redshift-mcp"}]}'
-
-Key                 CallerRoleGranted
-Description         The role (if any) granted execute-api:Invoke via the CallerRoleArn
-parameter at deploy time. Empty if CallerRoleArn was not provided.
-Value
+```bash
+aws iam put-role-policy \
+  --role-name <ROLE_NAME> \
+  --policy-name InvokeRedshiftMcpApi \
+  --policy-document '{
+    "Version": "2012-10-17",
+    "Statement": [
+      {
+        "Effect": "Allow",
+        "Action": "execute-api:Invoke",
+        "Resource": "arn:aws:execute-api:<region>:<account-id>:<api-id>/*/POST/mcp"
+      },
+      {
+        "Effect": "Allow",
+        "Action": "lambda:InvokeFunction",
+        "Resource": "arn:aws:lambda:<region>:<account-id>:function:redshift-mcp-redshift-mcp"
+      }
+    ]
+  }'
 ```
 
 What you'll actually use from this:
 
 - **`RedshiftMcpApiUrl`** — the endpoint you'll register with AWS DevOps Agent in Step 3 (Service Name = `execute-api`).
 - **`DevOpsAgentRoleArn`** — only appears if you deployed with `CreateDevOpsAgentRole=true` (see below). You'll use this in Step 3 as the IAM role.
-- **`GrantInvokeCommand`** — a ready-to-run `aws iam put-role-policy` command (with your actual API ID and function ARN filled in) for granting invoke access to any additional caller role later. See **Grant invoke access to a caller** below.
+- **`GrantInvokeCommand`** — a ready-to-run `aws iam put-role-policy` command (with your actual API ID and function ARN filled in) for granting invoke access to any additional caller role later. See [`deployment/README.md`](deployment/README.md#grant-invoke-access-to-a-caller).
 
 See [`deployment/sam-app/README.md`](deployment/sam-app/README.md) for the full parameter reference, and for an interactive `sam deploy --guided` alternative if you'd rather be prompted for each value.
 
@@ -122,78 +113,7 @@ cd skills/redshift-support-specialist/deployment
 
 `build_zip.sh` runs a plain `pip install --platform manylinux2014_aarch64` on the host — no Docker or Finch required, for the same reason as Option A above. The optional third argument to `deploy.sh` grants that caller role `execute-api:Invoke` on the API and `lambda:InvokeFunction` on the function automatically, so you can skip the manual grant step below.
 
-#### Deployment prerequisites
-
-##### Tools
-
-- AWS CLI v2, configured with credentials for the target account (see **Permissions required to deploy** below).
-- Python 3.9+ with `pip`, and the `zip` command — both are preinstalled on macOS and most Linux distributions (Windows: use WSL, or install `zip` separately). Used at build time to install `uv` and `mcp-proxy` targeting the Lambda runtime's platform (`manylinux2014_aarch64`, Python 3.13) via `pip install --platform --only-binary=:all:` — no compiler, no Docker, no Finch. This works because every dependency in this deployment publishes prebuilt manylinux/arm64 wheels.
-- Option A only: the [SAM CLI](https://docs.aws.amazon.com/serverless-application-model/latest/developerguide/serverless-sam-cli-install.html) (`brew install aws-sam-cli` on macOS).
-
-##### Permissions required to deploy
-
-The credentials you deploy with (not the Lambda's own execution role — see below) need permission to create the IAM role, the Lambda function, and the API Gateway REST API. [`deployment/deployer-permissions-policy.json`](deployment/deployer-permissions-policy.json) is a ready-to-use IAM policy scoped to this deployment's specific resource names (`redshift-mcp-lambda-role` role, `redshift-mcp-proxy-zip*` function). If you deploy under a different function/role name, update the ARNs in that file to match, or use a broader policy (e.g. `AdministratorAccess`) for a one-off test in a sandbox account.
-
-Attach it to your own IAM user/role, or hand it to whoever will run `deploy.sh` / `sam deploy`:
-
-```bash
-aws iam put-user-policy \
-  --user-name <your-iam-user> \
-  --policy-name RedshiftMcpDeployerAccess \
-  --policy-document file://deployer-permissions-policy.json
-```
-
-(Substitute `put-role-policy --role-name <role>` if deploying from an assumed role instead of an IAM user.)
-
-Option A (SAM) additionally needs the `SamCloudFormationStack` and `SamManagedArtifactBucket` statements in that file — `sam deploy --resolve-s3` creates a managed S3 bucket (`aws-sam-cli-managed-*`) for deployment artifacts and deploys via a CloudFormation stack. Option B (plain CLI) only needs the IAM and Lambda statements.
-
-If you deploy with `CreateDevOpsAgentRole=true` (see [`deployment/sam-app/README.md`](deployment/sam-app/README.md#create-a-devops-agent-iam-role)), you also need the `IamDevOpsAgentRoleManagement` statement in that file, and must pass `--capabilities CAPABILITY_NAMED_IAM` instead of `CAPABILITY_IAM` (the created role has an explicit name).
-
-##### The MCP server's own execution role
-
-The connected MCP server's Lambda execution role needs Redshift/Redshift Data API read permissions — see [`deployment/redshift-access-policy.json`](deployment/redshift-access-policy.json) for the exact policy used. Both deploy options attach this automatically; you don't need to do anything extra. No additional permissions are required on the DevOps Agent's own IAM role, since all Redshift access happens through the MCP server, not the agent directly.
-
-##### Authentication model — what this deployment produces
-
-This deployment does **not** create an API key, username/password, or any custom authentication. The endpoint is IAM-authorized, meaning every request must be signed with [AWS SigV4](https://docs.aws.amazon.com/IAM/latest/UserGuide/reference_sigv4.html) using valid AWS credentials belonging to a principal (IAM user or role) that has been explicitly granted invoke access (see **Grant invoke access to a caller** below). Requests without a valid SigV4 signature, or from a principal that hasn't been granted access, are rejected by AWS before they reach your code — there is no application-level auth to configure.
-
-Practically, this means:
-
-- Any MCP client that supports SigV4-signed HTTP requests can call the endpoint, as long as it signs for the `execute-api` service (the same service AWS DevOps Agent's SigV4 auth signs for) and is running with credentials for a permitted principal.
-- There is no shared secret to distribute — access control is entirely IAM-based, per caller identity.
-- `deployment/scripts/mcp_call.py` and `deployment/scripts/list_clusters.py` demonstrate the exact SigV4 signing steps in Python (via `botocore.auth.SigV4Auth`) if you're integrating a custom client.
-
-#### Grant invoke access to a caller
-
-Each principal (user or role) that needs to call the endpoint must be explicitly granted `execute-api:Invoke` on it, plus `lambda:InvokeFunction` on the underlying Lambda function — both are required, since the API integration invokes the Lambda using the caller's own IAM identity rather than API Gateway's own service principal. Both deploy paths can do this automatically for one caller role at deploy time:
-
-- **SAM**: pass `--parameter-overrides CallerRoleArn=arn:aws:iam::<account-id>:role/<role-name>`.
-- **Plain CLI**: pass the role ARN as `deploy.sh`'s third argument.
-
-For any additional caller roles (or if you skipped the option above), grant access manually. Get `<api-id>` from the `RedshiftMcpApiUrl` stack output (SAM) or the printed endpoint (plain CLI), and `<function-name>`/`<function-arn>` from the `RedshiftMcpFunctionArn` output (SAM) or `aws lambda get-function` (plain CLI):
-
-```bash
-aws iam put-role-policy \
-  --role-name <caller-role-name> \
-  --policy-name InvokeRedshiftMcpApi \
-  --policy-document '{
-    "Version": "2012-10-17",
-    "Statement": [
-      {
-        "Effect": "Allow",
-        "Action": "execute-api:Invoke",
-        "Resource": "arn:aws:execute-api:<region>:<account-id>:<api-id>/*/POST/mcp"
-      },
-      {
-        "Effect": "Allow",
-        "Action": "lambda:InvokeFunction",
-        "Resource": "arn:aws:lambda:<region>:<account-id>:function:<function-name>"
-      }
-    ]
-  }'
-```
-
-Repeat for every caller role (for example, each role used by an agent platform's AgentSpace/WebappAdmin roles).
+Deployment prerequisites (AWS CLI, Python/SAM CLI, IAM permissions to deploy), the authentication model, and how to grant additional caller roles invoke access are covered in [`deployment/README.md`](deployment/README.md).
 
 #### Test the deployment
 
@@ -239,28 +159,7 @@ python3 deployment/scripts/mcp_call.py execute_query \
   '{"cluster_identifier": "my-cluster", "database_name": "dev", "sql": "SELECT 1"}'
 ```
 
-#### Configuration (environment variables on the Lambda function)
-
-| Variable | Purpose | Notes |
-|---|---|---|
-| `AWS_LAMBDA_EXEC_WRAPPER` | `/opt/bootstrap` — invokes the handler through the Web Adapter layer's wrapper. | Fixed, don't change. |
-| `AWS_LWA_PORT` | `8000` — port the adapter forwards traffic to. | Fixed, don't change. |
-| `AWS_LWA_READINESS_CHECK_PATH` | `/mcp` — path the adapter polls until the server is ready. | Fixed, don't change. |
-| `FASTMCP_LOG_LEVEL` | Log verbosity for the underlying MCP server. | Configurable (SAM parameter `FastMcpLogLevel`, or edit `deploy.sh`). |
-| `AWS_DEFAULT_REGION` | Region for the MCP server's boto3 calls. | Automatically provided by the Lambda runtime — do not set manually (Lambda reserves this key). |
-
-`mcp-proxy` runs with `--pass-environment`, so any additional variable set on the Lambda function is forwarded automatically to the spawned `uvx awslabs.redshift-mcp-server@latest` process (anything you'd otherwise put in the standard stdio config's `env` block).
-
-#### Updating to a newer server release
-
-Nothing to do — `uvx awslabs.redshift-mcp-server@latest` re-resolves the latest PyPI version on every **cold start**. To force an immediate refresh, either wait for the next natural cold start, or trigger one with a no-op `update-function-configuration` (invalidates warm execution environments).
-
-#### Cost and operational notes
-
-- **Cold start**: `uvx` downloads and installs `awslabs.redshift-mcp-server` and its dependencies fresh on every cold start (~10-20s extra latency vs. a pre-baked container image; observed ~11s total duration end-to-end on a cold `list_clusters` call in testing). Warm invocations are fast.
-- **No idle cost** — unlike an EC2-based deployment, there is no cost when the function isn't being invoked (aside from negligible log storage).
-- **512 MB memory / 60s timeout** by default — adjust if you see timeouts under load.
-- **IAM permissions** granted to the execution role (see `deployment/redshift-access-policy.json` / the SAM template's inline policy): `redshift:DescribeClusters`, `redshift-serverless:ListWorkgroups`/`GetWorkgroup`, `redshift-data:ExecuteStatement`/`DescribeStatement`/`GetStatementResult`, `redshift-serverless:GetCredentials`, `redshift:GetClusterCredentialsWithIAM`/`GetClusterCredentials`. This is the minimum set the MCP server's six tools need; it does not grant write access to Redshift data — the server's own `execute_query` tool runs SQL inside a read-only transaction regardless of IAM permissions.
+Environment variable reference, cold-start/cost notes, and how the MCP server picks up new PyPI releases are covered in [`deployment/README.md`](deployment/README.md).
 
 #### Tearing down
 
@@ -302,10 +201,10 @@ Once the MCP server is deployed and you've confirmed it works (Step 2's **Test t
 
 1. **Configure IAM role**:
    - If you deployed with `CreateDevOpsAgentRole=true`, choose **Use an existing role** and select the role at the `DevOpsAgentRoleArn` stack output (e.g. `DevOpsAgentRole-Redshift-support-specialist`) — it's already trust-configured and permissioned for this exact endpoint.
-   - Otherwise, choose **Create a new role manually** and follow the console's prompts (trust policy for `aidevops.amazonaws.com`, permissions for `execute-api:Invoke` on this API — see Step 2's **Grant invoke access to a caller** for the policy shape).
+   - Otherwise, choose **Create a new role manually** and follow the console's prompts (trust policy for `aidevops.amazonaws.com`, permissions for `execute-api:Invoke` on this API — see [`deployment/README.md`](deployment/README.md#grant-invoke-access-to-a-caller) for the policy shape).
 2. **AWS Region** — the region you deployed to (e.g. `us-east-1`).
 3. **Service Name** — `execute-api`.
-4. Choose **Add**, then wait for AWS DevOps Agent to register the MCP server successfully. If registration fails, re-check the endpoint URL and that the IAM role has both `execute-api:Invoke` and `lambda:InvokeFunction` (see Step 2's **Grant invoke access to a caller**).
+4. Choose **Add**, then wait for AWS DevOps Agent to register the MCP server successfully. If registration fails, re-check the endpoint URL and that the IAM role has both `execute-api:Invoke` and `lambda:InvokeFunction` (see [`deployment/README.md`](deployment/README.md#grant-invoke-access-to-a-caller)).
 
 **3d. Add it to your Agent Space:**
 
@@ -350,16 +249,6 @@ Redshift MCP Server on Lambda, behind API Gateway (AWS_IAM auth)   (deployment/)
         v
 Amazon Redshift (provisioned clusters / Serverless workgroups)
 ```
-
-## Setup Overview
-
-Follow these steps **in order** — each one depends on the previous:
-
-1. **MCP Server Deployment** ([Step 2](#step-2--deploy-the-redshift-mcp-server) below) — deploy the Redshift MCP server (AWS SAM or plain CLI) and confirm it works.
-2. **Connect the MCP server to your Agent Space** ([Step 3](#step-3--connect-the-mcp-server-to-your-agent-space) below) — register it and allowlist its tools.
-3. **Upload this skill** ([Step 4](#step-4--uploading-to-aws-devops-agent) below).
-4. **(Optional) Create the custom agent** ([Create a Custom Agent](#optional-create-a-custom-agent) below) — a dedicated agent pre-wired to this skill.
-5. **Use it** ([How to Use This Skill](#how-to-use-this-skill) below) — ask the DevOps Agent things like "run a health check on my Redshift cluster" in Chat.
 
 ## Limitations
 
