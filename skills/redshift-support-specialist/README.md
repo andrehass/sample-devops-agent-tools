@@ -281,11 +281,33 @@ Once connected, import this skill directly from the repository: in the DevOps Ag
 
 In addition to using this skill from the base DevOps Agent Chat, create a dedicated **custom agent** pre-wired to this skill and its MCP tools — useful if you want a purpose-built entry point for Redshift work, or want to enforce agent-specific behavior (this custom agent always runs in the active chat session and never switches to background mode).
 
-The custom agent lives in [`custom-agents/redshift-support-specialist/`](../../custom-agents/redshift-support-specialist/) at the repo root. Its README covers:
+The custom agent's system prompt, README, and changelog live in [`custom-agents/redshift-support-specialist/`](../../custom-agents/redshift-support-specialist/) at the repo root.
 
-- Creating the agent (Form: name, system prompt, skill selection).
-- Assigning the six MCP tools via Chat (tools can only be assigned this way, not through the Form).
-- Executing the agent.
+**4a. Create the agent:**
+
+1. In the DevOps Agent web app, go to the **Agents** page.
+2. In the **Custom Agents** section, click **Create agent**.
+3. In the dialog, click **Form**.
+4. Fill out the form:
+   - **Name** — `redshift-support-specialist` (lowercase letters, numbers, hyphens only).
+   - **System prompt** — copy the full content of [`custom-agents/redshift-support-specialist/SYSTEM_PROMPT.md`](../../custom-agents/redshift-support-specialist/SYSTEM_PROMPT.md) and paste it in.
+   - **Skills** — select the `redshift-support-specialist` skill (the one you uploaded in Step 3).
+5. Click **Create agent**.
+
+**4b. Assign the MCP tools (Chat only):**
+
+MCP tools cannot be assigned through the Form — they can only be configured through Chat, either when creating the agent via Chat instead of Form, or by editing an existing agent:
+
+1. On the newly created agent's page, click **Edit**, then select **Chat**. A new chat opens.
+2. Once DevOps Agent finishes loading the agent's context, type:
+
+   ```text
+   Add the list_clusters, list_databases, list_schemas, list_tables, list_columns, and execute_query tools from the awslabs.redshift-mcp-server MCP server to this custom agent.
+   ```
+
+3. Once the chat finishes, verify all six tools appear under **Tools** on the agent's page. This agent has no other way to reach Redshift — without these tools assigned, it cannot call the MCP server at all.
+
+See [`custom-agents/redshift-support-specialist/README.md`](../../custom-agents/redshift-support-specialist/README.md) for prerequisites, an important behavior note (this agent always runs in active chat, never background), and how to execute the agent once created.
 
 ## Step 5 — How to Use the Skill
 
