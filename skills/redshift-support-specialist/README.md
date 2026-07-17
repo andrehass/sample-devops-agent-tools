@@ -4,46 +4,6 @@ A self-contained solution for connecting [AWS DevOps Agent](https://docs.aws.ama
 
 > ⚠️ **Non-production disclaimer:** This skill is sample code, not intended for production use without additional review and testing. Users should validate in a non-production environment first.
 
-## How the Pieces Fit Together
-
-```text
-AWS DevOps Agent Chat
-        |  (natural language: "why is this Redshift query slow?")
-        v
-This skill: redshift-support-specialist
-        |  (calls the 6 MCP tools: list_clusters, list_databases,
-        |   list_schemas, list_tables, list_columns, execute_query)
-        v
-Redshift MCP Server on Lambda, behind API Gateway (AWS_IAM auth)   (deployment/)
-        |  (Redshift Data API -- no VPC, no container image, no ECR)
-        v
-Amazon Redshift (provisioned clusters / Serverless workgroups)
-```
-
-## Setup Overview
-
-Follow these steps **in order** — each one depends on the previous:
-
-1. **Deploy the MCP server** ([Step 2](#step-2--deploy-the-redshift-mcp-server) below) — produces an API Gateway endpoint. Quickest path (AWS SAM, no prompts):
-
-   ```bash
-   cd skills/redshift-support-specialist/deployment/sam-app
-   sam build
-   sam deploy \
-     --stack-name redshift-mcp \
-     --capabilities CAPABILITY_NAMED_IAM \
-     --resolve-s3 \
-     --region us-east-1 \
-     --no-confirm-changeset \
-     --no-fail-on-empty-changeset
-   ```
-
-2. **Test the deployment** ([Step 2](#test-the-deployment) below) — confirm the endpoint actually works before wiring it into DevOps Agent.
-3. **Connect the MCP server to your Agent Space** ([Step 3](#step-3--connect-the-mcp-server-to-your-agent-space) below) — register it and allowlist its tools.
-4. **Upload this skill** ([Step 4 — Uploading to AWS DevOps Agent](#step-4--uploading-to-aws-devops-agent) below).
-5. **(Optional) Create the custom agent** ([Create a Custom Agent](#optional-create-a-custom-agent) below) — a dedicated agent pre-wired to this skill.
-6. **Use it** ([How to Use This Skill](#how-to-use-this-skill) below) — ask the DevOps Agent things like "run a health check on my Redshift cluster" in Chat.
-
 ## Purpose
 
 Amazon Redshift domain expertise for [AWS DevOps Agent](https://docs.aws.amazon.com/devopsagent/latest/userguide/about-aws-devops-agent.html). Query performance and cluster operations are highly specialized — this skill packages that expertise (system-table diagnostics, signal thresholds, best-practices references) so the agent can run real diagnostics through the connected Redshift MCP server instead of giving generic advice, and so users don't have to manually extract data or paste CSVs into chat to get an answer.
@@ -89,25 +49,6 @@ No EC2 instance, no load balancer, no VPC networking, and no container registry 
   `uvx` always resolves the latest published PyPI release on cold start — no separate fork to keep in sync with upstream security fixes.
 - **No container image, no ECR.** Packaged as a plain Lambda `.zip` deployment, using the public [AWS Lambda Web Adapter](https://github.com/aws/aws-lambda-web-adapter) **layer** (not an image) so the HTTP server `mcp-proxy` exposes runs inside Lambda's request/response model.
 - **No VPC required.** The MCP server talks to Redshift only via the Redshift Data API (`redshift-data:ExecuteStatement` etc.) — plain AWS API calls, not a database socket connection.
-
-#### Architecture
-
-```text
-Caller (SigV4-signed request, service=execute-api)
-                       │
-                       ▼
-API Gateway REST API
-(AWS_IAM auth, /mcp)
-                       │
-                       ▼
-Lambda execution environment (arm64, Python 3.13 runtime)
-  ├─ Lambda Web Adapter (layer, /opt/extensions/lambda-adapter)
-  │     forwards HTTP traffic to 127.0.0.1:8000
-  └─ run.sh (function handler)
-        └─ mcp-proxy --port=8000 --stateless --pass-environment -- \
-             uvx awslabs.redshift-mcp-server@latest
-                 └─ talks to Redshift via the Redshift Data API (boto3)
-```
 
 #### Two ways to deploy
 
@@ -374,6 +315,51 @@ Once the MCP server is deployed and you've confirmed it works (Step 2's **Test t
 4. Choose **Add**.
 
 > Full reference: [Connecting MCP Servers](https://docs.aws.amazon.com/devopsagent/latest/userguide/configuring-integrations-and-knowledge-connecting-mcp-servers.html)
+
+## Architecture
+
+```text
+Caller (SigV4-signed request, service=execute-api)
+                       │
+                       ▼
+API Gateway REST API
+(AWS_IAM auth, /mcp)
+                       │
+                       ▼
+Lambda execution environment (arm64, Python 3.13 runtime)
+  ├─ Lambda Web Adapter (layer, /opt/extensions/lambda-adapter)
+  │     forwards HTTP traffic to 127.0.0.1:8000
+  └─ run.sh (function handler)
+        └─ mcp-proxy --port=8000 --stateless --pass-environment -- \
+             uvx awslabs.redshift-mcp-server@latest
+                 └─ talks to Redshift via the Redshift Data API (boto3)
+```
+
+## How the Pieces Fit Together
+
+```text
+AWS DevOps Agent Chat
+        |  (natural language: "why is this Redshift query slow?")
+        v
+This skill: redshift-support-specialist
+        |  (calls the 6 MCP tools: list_clusters, list_databases,
+        |   list_schemas, list_tables, list_columns, execute_query)
+        v
+Redshift MCP Server on Lambda, behind API Gateway (AWS_IAM auth)   (deployment/)
+        |  (Redshift Data API -- no VPC, no container image, no ECR)
+        v
+Amazon Redshift (provisioned clusters / Serverless workgroups)
+```
+
+## Setup Overview
+
+Follow these steps **in order** — each one depends on the previous:
+
+1. **MCP Server Deployment** ([Step 2](#step-2--deploy-the-redshift-mcp-server) below) — deploy the Redshift MCP server (AWS SAM or plain CLI) and confirm it works.
+2. **Connect the MCP server to your Agent Space** ([Step 3](#step-3--connect-the-mcp-server-to-your-agent-space) below) — register it and allowlist its tools.
+3. **Upload this skill** ([Step 4](#step-4--uploading-to-aws-devops-agent) below).
+4. **(Optional) Create the custom agent** ([Create a Custom Agent](#optional-create-a-custom-agent) below) — a dedicated agent pre-wired to this skill.
+5. **Use it** ([How to Use This Skill](#how-to-use-this-skill) below) — ask the DevOps Agent things like "run a health check on my Redshift cluster" in Chat.
 
 ## Limitations
 
