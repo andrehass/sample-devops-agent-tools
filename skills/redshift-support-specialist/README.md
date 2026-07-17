@@ -107,8 +107,9 @@ aws iam put-role-policy \
 What you'll actually use from this:
 
 - **`RedshiftMcpApiUrl`** — the endpoint you'll register with AWS DevOps Agent in Step 2 (Service Name = `execute-api`).
-- **`DevOpsAgentRoleArn`** — only appears if you deployed with `CreateDevOpsAgentRole=true` (see below). You'll use this in Step 2 as the IAM role.
-- **`GrantInvokeCommand`** — a ready-to-run `aws iam put-role-policy` command (with your actual API ID and function ARN filled in) for granting invoke access to any additional caller role later. See [`deployment/README.md`](deployment/README.md#grant-invoke-access-to-a-caller).
+- **`DevOpsAgentRoleArn`** — only appears if you deployed with `CreateDevOpsAgentRole=true` (see below). You'll use this in Step 2 as the IAM role — it already has invoke access to the API, no manual grant needed.
+
+`GrantInvokeCommand`/`CallerRoleGranted` only matter if you need to grant invoke access to an *additional* caller role beyond the one created above — see [`deployment/README.md`](deployment/README.md#grant-invoke-access-to-a-caller) if that applies to you.
 
 See [`deployment/sam-app/README.md`](deployment/sam-app/README.md) for the full parameter reference, and for an interactive `sam deploy --guided` alternative if you'd rather be prompted for each value.
 
