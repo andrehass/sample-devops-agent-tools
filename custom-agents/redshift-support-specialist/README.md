@@ -2,7 +2,7 @@
 
 ## Purpose
 
-This custom agent is a lean orchestrator for the [`redshift-support-specialist`](../../skills/redshift-support-specialist/) skill. It bridges that skill's domain knowledge (query optimization, operational reviews, disaster recovery guidance, incident detection guidance, cost optimization) to the six tools exposed by the connected `awslabs.redshift-mcp-server` MCP server, and adds one important behavior override: it always runs in the active chat session and never switches to background execution, even for the multi-step Detailed Operational Review.
+This custom agent is a lean orchestrator for the [`redshift-support-specialist`](../../skills/redshift-support-specialist/) skill. It bridges that skill's domain knowledge (query optimization, operational reviews, disaster recovery guidance, incident detection guidance, cost optimization) to the six tools exposed by the connected `awslabs.redshift-mcp-server` MCP server, and enforces one important behavior rule: it runs in the active chat session by default and never offers or silently switches to background execution — even for the multi-step Detailed Operational Review — unless the user explicitly asks for background mode after confirming the cluster/database scope.
 
 ## Key Capabilities
 
@@ -14,7 +14,7 @@ This custom agent is a lean orchestrator for the [`redshift-support-specialist`]
 
 ## Important behavior note
 
-The skill's own `SKILL.md` lets the user choose between background mode and step-by-step execution for the Detailed Operational Review (Capability 3). This custom agent's system prompt (Section 0) overrides that choice and unconditionally forbids background mode — everything runs in the active foreground chat so the user can watch progress and intervene at any point. This is an intentional agent-level override, not a bug: if you expect background-mode behavior from the skill's documentation, note that this custom agent will not offer it.
+This agent (and the skill itself, as of skill v1.7.0) runs interactively in the active foreground chat by default, so the user can watch progress and intervene at any point. It never offers background execution in its confirmation questions and never switches to background mode on its own — a platform prompt or default does not count. The only way to get a background run is to explicitly ask for one yourself, after the agent has confirmed the target cluster/workgroup and database scope with you. This is intentional: scoped confirmation always comes first, and interactive execution is the default.
 
 ## Prerequisites
 
@@ -51,7 +51,7 @@ MCP tools cannot be assigned through the Form — they can only be configured th
 
 ## Executing the Agent
 
-You can execute the custom agent on-demand from the custom agent page or using chat. Follow the [Executing custom agents guide](https://docs.aws.amazon.com/devopsagent/latest/userguide/custom-agents-executing-custom-agents.html) for more information. Because this agent always runs in the active chat session (never in the background), it's best suited to interactive use rather than scheduled runs — ask it things like "why is this Redshift query slow?" or "run a detailed operational review on my cluster."
+You can execute the custom agent on-demand from the custom agent page or using chat. Follow the [Executing custom agents guide](https://docs.aws.amazon.com/devopsagent/latest/userguide/custom-agents-executing-custom-agents.html) for more information. Because this agent runs in the active chat session by default (background only when you explicitly ask, after scope confirmation), it's best suited to interactive use rather than scheduled runs — ask it things like "why is this Redshift query slow?" or "run a detailed operational review on my cluster."
 
 ## Related
 

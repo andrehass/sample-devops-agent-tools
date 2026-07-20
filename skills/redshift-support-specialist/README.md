@@ -290,7 +290,7 @@ MCP tools cannot be assigned through the Form — they can only be configured th
 
 3. Once the chat finishes, verify all six tools appear under **Tools** on the agent's page. This agent has no other way to reach Redshift — without these tools assigned, it cannot call the MCP server at all.
 
-See [`custom-agents/redshift-support-specialist/README.md`](../../custom-agents/redshift-support-specialist/README.md) for prerequisites, an important behavior note (this agent always runs in active chat, never background), and how to execute the agent once created.
+See [`custom-agents/redshift-support-specialist/README.md`](../../custom-agents/redshift-support-specialist/README.md) for prerequisites, an important behavior note (this agent runs interactively in the active chat by default; background only on explicit request after scope confirmation), and how to execute the agent once created.
 
 ## Step 5 — How to Use the Skill
 
@@ -302,7 +302,7 @@ If you created the custom agent in Step 4, start there:
 
 1. Start a new chat and ask for the `redshift-support-specialist` custom agent by name (e.g. "Use the redshift-support-specialist agent").
 2. Ask it to show what it can do (e.g. "What can you help me with?") and follow its instructions from there.
-3. If it ever offers a background-mode option (e.g. for a Detailed Operational Review), explicitly ask it to run interactively in the chat instead — e.g. "Run this interactively in the chat, not in the background." The custom agent's system prompt is designed to always run in the active chat session, but if you see a background-mode prompt anyway, this confirms your intent.
+3. The agent runs interactively in the active chat by default and should never offer or switch to background mode on its own. If you ever see it start a background task anyway, tell it explicitly — e.g. "Run this interactively in the chat, not in the background." (Background mode is available only if you ask for it yourself, after confirming the cluster/database scope.)
 
 If you're not using the custom agent, the base DevOps Agent Chat with this skill uploaded works the same way — just describe what you need directly, without naming an agent.
 
@@ -323,10 +323,10 @@ If you're not using the custom agent, the base DevOps Agent Chat with this skill
 - "Run a detailed operational review on cluster `my-cluster`."
 - "Do a full diagnostic sweep of my Redshift Serverless workgroup, all databases."
 
-The agent will first ask you to confirm scope (which cluster/workgroup and database(s)), execution mode (background vs. step-by-step), and whether you want a downloadable HTML report — answer that one combined question and it proceeds. **To make sure you get the full HTML report** (not just the in-chat Markdown summary), say so explicitly, for example:
+The agent will first ask you to confirm scope (which cluster/workgroup and database(s)) and whether you want a downloadable HTML report — answer that one combined question and it proceeds, running interactively in the chat. It never offers or defaults to background mode; if you'd rather run it in the background, explicitly ask for that after confirming scope. **To make sure you get the full HTML report** (not just the in-chat Markdown summary), say so explicitly, for example:
 
 - "Run a detailed operational review on `my-cluster` and generate the full downloadable HTML report."
-- "Yes, background mode, and yes I want the HTML report file." (as a reply to the agent's combined confirmation question)
+- "All databases, and yes I want the HTML report file." (as a reply to the agent's combined confirmation question)
 
 Every report — HTML and Markdown — always includes the full section set: executive summary, cluster overview, all findings, WLM configuration, workload analysis, top queries by runtime, table design, Spectrum/external queries, data sharing, and prioritized recommendations. The "Cluster Level Review (Power-2)" section (CloudWatch metrics, SSL/audit config, support cases) is always marked "Not Available via MCP tools" since that data requires AWS CLI/CloudWatch access this skill doesn't have.
 
@@ -349,7 +349,7 @@ Every report — HTML and Markdown — always includes the full section set: exe
 
 - Discovers clusters/workgroups itself via `list_clusters` — never asks you to type a cluster identifier or CLI profile from memory.
 - Collects diagnostics live via `execute_query` — never asks you to upload a CSV or run an extraction script.
-- For the detailed operational review, always asks you to confirm database scope, background/step-by-step mode, and HTML-report preference in one combined message before collecting any data.
+- For the detailed operational review, always asks you to confirm database scope and HTML-report preference in one combined message before collecting any data, then runs interactively in the chat (background mode only if you explicitly ask for it after confirming scope).
 - Clearly marks any check that needs AWS CLI/CloudWatch access (which the MCP server does not provide) as "Not Available," rather than guessing.
 - Quotes the actual tool error text back to you if a diagnostic query fails (missing view, permission denied, etc.) instead of just saying "failed," and continues with the remaining sections.
 

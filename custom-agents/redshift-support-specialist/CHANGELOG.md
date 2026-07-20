@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.1.0
+
+- Section 0 relaxed from "never background under any circumstances" to interactive-by-default: background execution is now honored only when the user explicitly asks for it, and only after cluster/workgroup and database scope have been confirmed (aligns with skill v1.7.0 Core Rule 11)
+- Added rule 10a: an empty result set from a tool call is not a failure — report it with a friendly, positive message (e.g. "✅ No queries with disk spill found — nothing to fix here") and mark the check as PASS, even when the chat UI shows a "failed" badge
+
 ## 1.0.0
 
 - Initial version

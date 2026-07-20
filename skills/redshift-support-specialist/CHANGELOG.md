@@ -1,5 +1,15 @@
 # Changelog
 
+## [1.7.0] - 2026-07-20
+
+### Changed
+
+- Execution mode is now interactive-by-default and no longer offered as a choice: Core Rule 10's confirmation question covers scope only (cluster/workgroup + database(s)), and the new Core Rule 11 requires all data collection to run turn by turn in the active chat session. Background execution is allowed only when the user explicitly asks for it, and only after the full scope has been confirmed. Previously the agent asked "background or step-by-step?" as part of the confirmation message, which led platforms to default into background runs. Capability 3's combined confirmation message updated accordingly (scope + HTML-report preference; no execution-mode question).
+
+### Added
+
+- Core Rule 9 now includes an explicit empty-result rule: a query that succeeds but returns zero rows is a normal, often healthy outcome (no disk spill, no queue waits, no stale tables) and must be reported with a friendly, positive message (e.g. "✅ No queries with disk spill found — nothing to fix here") and marked ✅ PASS / "no findings" — never as failed, even when the chat UI shows a generic "failed" badge on the tool call. Failure language is reserved for actual errors with error text.
+
 ## [1.6.2] - 2026-07-16
 
 ### Fixed
