@@ -1,5 +1,7 @@
 # Redshift Support Specialist — Custom Agent
 
+**Version: 1.3.0** (see [`CHANGELOG.md`](CHANGELOG.md)) | Requires skill version 1.8.0+ (see [`skills/redshift-support-specialist/`](../../skills/redshift-support-specialist/))
+
 ## Purpose
 
 This custom agent is a lean orchestrator for the [`redshift-support-specialist`](../../skills/redshift-support-specialist/) skill. It bridges that skill's domain knowledge (query optimization, operational reviews, cost optimization) to the six tools exposed by the connected `awslabs.redshift-mcp-server` MCP server, and enforces one important behavior rule: **no scope, no run**. Custom agents execute as asynchronous invocations (there is no interactive user to answer questions mid-run), so the target cluster/workgroup and database(s) must be provided in the invocation prompt — if they're missing, the agent ends the run immediately with a "Scope required — run not started" report instead of guessing or defaulting.

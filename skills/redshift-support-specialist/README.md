@@ -1,5 +1,7 @@
 # Amazon Redshift Support Specialist — AWS DevOps Agent Skill
 
+**Skill version: 1.8.0** (see [`CHANGELOG.md`](CHANGELOG.md)) | Companion custom agent: 1.3.0 (see [`custom-agents/redshift-support-specialist/`](../../custom-agents/redshift-support-specialist/))
+
 A self-contained solution for connecting [AWS DevOps Agent](https://docs.aws.amazon.com/devopsagent/latest/userguide/about-aws-devops-agent.html) to Amazon Redshift: this skill (query optimization, operational reviews, and cost optimization), plus a ready-to-use serverless deployment of the `awslabs.redshift-mcp-server` MCP server it relies on.
 
 > ⚠️ **Non-production disclaimer:** This skill is sample code, not intended for production use without additional review and testing. Users should validate in a non-production environment first.
