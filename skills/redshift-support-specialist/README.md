@@ -12,11 +12,45 @@ Amazon Redshift domain expertise for [AWS DevOps Agent](https://docs.aws.amazon.
 
 ## Key Capabilities
 
-- **Query optimization** — diagnoses a specific slow query (EXPLAIN plan, disk spill, distribution/sort key issues) and returns concrete SQL/config fixes.
-- **High-level operational review** — quick PASS/WARN/FAIL health check using only `list_clusters` data.
-- **Detailed operational review** — full diagnostic sweep (storage, WLM, table design, Advisor recommendations) producing both a downloadable HTML report and an in-chat Markdown summary.
+### 1.Query Optimization
 
-- **Cost optimization** — node/RPU right-sizing and serverless migration analysis using live table and workload data.
+Tunes slow or expensive queries by analyzing their execution plans, step-level detail, and table design. Give it a query ID (or the query text), and it will:
+
+- Break down where time was spent (execution, queue, compile, planning, lock wait)
+- Identify root causes: disk spill, data redistribution, nested loops, missing statistics, broadcast joins
+- Produce a concrete fix table with `ALTER TABLE` SQL or rewrite suggestions
+
+### 2.High-Level Operational Review
+
+A quick health check using only the cluster/workgroup configuration — works even on paused clusters. It evaluates:
+
+- Node type, count, encryption, public accessibility, VPC placement
+- Security posture (encryption at rest, public access)
+- Produces a PASS/WARN/FAIL summary with a "Not Available" section for checks that need CloudWatch/AWS CLI access
+
+### 3.Detailed Operational Review
+
+A comprehensive, fully automated deep-dive that collects live data across all databases. Covers:
+
+- Storage utilization, RPU usage
+- Workload patterns (hourly breakdown, queue time, spill, cache hits)
+- Table design health (skew, compression, sort keys, distribution, stale stats, deletion bloat)
+- Advisor recommendations, Auto Table Optimization actions
+- Materialized view health (staleness, refresh type)
+- Top queries by runtime with per-query drill-down
+- COPY/load performance
+- Spectrum/external query performance
+- Data sharing consumer latency
+- Produces both an in-chat Markdown report and a downloadable HTML report
+
+### 4.Cost Optimization
+
+Analyzes the cluster or workgroup for cost reduction opportunities:
+
+- Node type and count assessment (over-provisioned compute)
+- Compression gap analysis (`encoded_column_pct`)
+- Serverless migration sizing — runs Q1/Q2 workload categorization queries to estimate RPU tier and project monthly costs across on-demand, 1yr RI, 3yr RI, and serverless scenarios
+- Checks for idle non-prod clusters, missing Reserved Instances, and cold data candidates for Spectrum offload
 
 ## Setup Overview
 
