@@ -1,9 +1,9 @@
 ---
 name: redshift-support-specialist
-description: Amazon Redshift domain expertise for query optimization, operational reviews, disaster recovery guidance, incident detection guidance, and cost optimization on provisioned clusters and Serverless workgroups. Use when a user asks about Redshift query tuning, slow queries, disk spill, distribution/sort key issues, a Redshift health check or operational review, Redshift cost or RPU sizing, or Redshift disaster recovery/backup posture. Requires the awslabs.redshift-mcp-server MCP server to be connected.
+description: Amazon Redshift domain expertise for query optimization, operational reviews, and cost optimization on provisioned clusters and Serverless workgroups. Use when a user asks about Redshift query tuning, slow queries, disk spill, distribution/sort key issues, a Redshift health check or operational review, or Redshift cost or RPU sizing. Requires the awslabs.redshift-mcp-server MCP server to be connected.
 compatibility: Requires the awslabs.redshift-mcp-server MCP server (https://pypi.org/project/awslabs.redshift-mcp-server/) to be connected as a capability provider.
 metadata:
-  version: "1.7.0"
+  version: "1.8.0"
   author: aws-samples
   aws-devops-agent-skills.agent-types: "Chat tasks"
   aws-devops-agent-skills.aws-services: "Amazon Redshift, Amazon Redshift Serverless"
@@ -56,8 +56,6 @@ Load these files when needed for deep context:
 - `references/system-tables-guide.md` — STL/SVL/SYS views for diagnostics and monitoring
 - `references/operational-review-signals.md` — Automated signal definitions, thresholds, and recommendation catalog
 - `references/serverless-sizing-guide.md` — Provisioned-to-serverless migration sizing methodology
-- `references/cloudwatch-metrics.md` — CloudWatch metrics reference for provisioned and serverless
-- `references/incident-response-playbooks.md` — Alarm-to-action mapping for incident response
 
 ## Assets
 
@@ -75,7 +73,7 @@ Load these files when needed for deep context:
 
 ## Capabilities
 
-You have six capabilities. Select the appropriate one based on the user's request.
+You have four capabilities. Select the appropriate one based on the user's request.
 
 ---
 
@@ -153,7 +151,7 @@ You have six capabilities. Select the appropriate one based on the user's reques
 
 1. Call the `list_clusters` MCP tool. **HARD STOP — present the discovered clusters/workgroups, confirm which one to review, and wait for the user's reply before evaluating/reporting anything (see Core Rule 10)** — state the target back explicitly even if there is only one candidate, unless the user already named the exact target in their request.
 2. From the `list_clusters` result, evaluate what is directly available: type (provisioned/serverless), status, node type/count, encryption, public accessibility, VPC, tags.
-3. Evaluate configuration against `references/best-practices.md` using only fields the `list_clusters` MCP tool returns. The following checks require AWS CLI/CloudWatch access that the MCP tools do not provide — state this plainly instead of guessing, and skip them: SSL enforcement (`require_ssl`), audit logging, Enhanced VPC Routing, custom parameter groups, maintenance window, auto-upgrade setting, Multi-AZ, CloudWatch alarm coverage, WLM parameter-group configuration, and snapshot inventory.
+3. Evaluate configuration against `references/best-practices.md` using only fields the `list_clusters` MCP tool returns. The following checks require AWS CLI/CloudWatch access that the MCP tools do not provide — state this plainly instead of guessing, and skip them: SSL enforcement (`require_ssl`), audit logging, Enhanced VPC Routing, custom parameter groups, maintenance window, auto-upgrade setting, Multi-AZ, WLM parameter-group configuration, and snapshot inventory.
 4. If the user wants those deeper checks, tell them they require AWS CLI/CloudWatch access beyond the six MCP tools.
 5. Produce a summary report with PASS/WARN/FAIL for the checks you could run, and an "Not Available" section listing what you could not check and why.
 
@@ -178,7 +176,7 @@ You have six capabilities. Select the appropriate one based on the user's reques
 ### Not Available (needs access beyond the six MCP tools)
 | Check | Reason |
 |-------|--------|
-| SSL enforcement, audit logging, snapshots, WLM parameter group, CloudWatch alarms | Requires AWS CLI / CloudWatch access not connected |
+| SSL enforcement, audit logging, snapshots, WLM parameter group | Requires AWS CLI / CloudWatch access not connected |
 ```
 
 ---
@@ -223,102 +221,7 @@ You have six capabilities. Select the appropriate one based on the user's reques
 
 ---
 
-### 4. Disaster Recovery Recommendations
-
-**When to use:** User mentions disaster recovery, DR, backup, recovery, resiliency, high availability, Multi-AZ, cross-region, snapshots, RPO, RTO.
-
-**Requires:** AWS CLI access, which the six `awslabs.redshift-mcp-server` MCP tools do NOT provide. Tell the user this capability cannot be executed automatically with the connected MCP tools, then offer the best-practice checklist and RPO/RTO guidance below as reference, and ask the user to share their current configuration (snapshot retention, Multi-AZ, cross-region copy) if they want it evaluated manually.
-
-**Workflow (only if the user provides the configuration details themselves):**
-
-1. Take the user-provided configuration: snapshot retention period, whether manual snapshots exist, cross-region copy status, Multi-AZ status, snapshot encryption status.
-2. Evaluate against DR best practices:
-
-| Check | Best Practice | Severity if Missing |
-|-------|--------------|---------------------|
-| Automated snapshots enabled | Retention >= 7 days (35 max) | ❌ FAIL |
-| Manual snapshots exist | At least 1 recent manual snapshot | ⚠️ WARN |
-| Cross-region snapshot copy | Enabled for production clusters | ⚠️ WARN (prod) |
-| Multi-AZ deployment | Enabled for production RA3 clusters | ⚠️ WARN (prod) |
-| Snapshot encryption | Snapshots encrypted with KMS | ❌ FAIL if cluster encrypted but snapshots not |
-| Restore testing | Evidence of recent restore test | ⚠️ WARN (manual check) |
-
-3. Provide RPO/RTO guidance:
-
-| Scenario | RPO | RTO | Recommended Configuration |
-|----------|-----|-----|--------------------------|
-| Standard | < 24h | < 4h | Automated snapshots (8h retention), same-region restore |
-| Enhanced | < 1h | < 1h | Automated snapshots (35d), cross-region copy, Multi-AZ |
-| Mission-critical | ~0 | < 15min | Multi-AZ + cross-region snapshots + data sharing consumers |
-
-4. Generate recommendations with priority and effort estimates
-
----
-
-### 5. Incident Detection & Response (CloudWatch Alarms)
-
-**When to use:** User mentions alarms, cloudwatch, monitoring, alerts, incident detection, IDR, missing alarms.
-
-**Requires:** CloudWatch access, which the six `awslabs.redshift-mcp-server` MCP tools do NOT provide. Tell the user this capability cannot be executed automatically with the connected MCP tools, and offer the recommended alarm set below as reference guidance instead. If the user pastes their current alarm configuration, compare it manually against the table below.
-
-**Workflow (only if the user provides their current alarm configuration):**
-
-1. Determine deployment type (provisioned vs serverless) using the `list_clusters` MCP tool.
-2. Compare the user-provided alarm list against the recommended alarm set below.
-3. Report: missing alarms, non-optimal thresholds, currently firing alarms.
-
-**Recommended Alarms — Provisioned (AWS/Redshift):**
-
-| Priority | Metric | Threshold | Period |
-|----------|--------|-----------|--------|
-| P0 | HealthStatus (Min) | < 1 | 300s |
-| P0 | PercentageDiskSpaceUsed (Avg) | > 75% | 300s |
-| P1 | CPUUtilization (Avg) | > 80% | 300s |
-| P1 | DatabaseConnections (Max) | > 400 | 300s |
-| P1 | WLMQueueWaitTime (Avg) | > 30s | 300s |
-| P1 | WLMQueueLength (Max) | > 10 | 300s |
-| P2 | ReadLatency (Avg) | > 10ms | 300s |
-| P2 | WriteLatency (Avg) | > 10ms | 300s |
-| P2 | QueryDuration (p90) | > 60s | 300s |
-| P2 | CommitQueueLength (Max) | > 5 | 300s |
-| P3 | ConcurrencyScalingActiveClusters (Sum) | > 0 | 300s |
-| P3 | MaintenanceMode (Max) | > 0 | 300s |
-
-**Recommended Alarms — Serverless (AWS/Redshift-Serverless):**
-
-| Priority | Metric | Threshold | Period |
-|----------|--------|-----------|--------|
-| P1 | ComputeCapacity (Max) | > 80% of max RPU | 300s |
-| P1 | DatabaseConnections (Max) | > 80% of limit | 300s |
-| P2 | ComputeSeconds (Sum 24h) | > 1.5x budget | 86400s |
-| P2 | QueryDuration (p90) | > 60s | 300s |
-
-**Output format:**
-
-```markdown
-## Redshift Alarm Evaluation — {cluster_or_workgroup}
-**Type:** {provisioned/serverless} | **Date:** {timestamp}
-
-### Alarm Coverage Summary
-| Priority | Recommended | Configured | Missing | Firing |
-|----------|-------------|------------|---------|--------|
-| P0 | {n} | {n} | {n} | {n} |
-| P1 | {n} | {n} | {n} | {n} |
-| P2 | {n} | {n} | {n} | {n} |
-| P3 | {n} | {n} | {n} | {n} |
-
-### Missing Alarms
-| Priority | Metric | Recommended Threshold | Action |
-|----------|--------|-----------------------|--------|
-
-### Currently Firing
-| Alarm Name | Metric | State | Since | First Response |
-|------------|--------|-------|-------|----------------|
-```
-
----
-
-### 6. Cost Optimization
+### 4. Cost Optimization
 
 **When to use:** User mentions cost optimization, cost reduction, right-sizing, reserved instances, serverless migration, RPU sizing.
 

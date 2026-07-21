@@ -2,14 +2,13 @@
 
 ## Purpose
 
-This custom agent is a lean orchestrator for the [`redshift-support-specialist`](../../skills/redshift-support-specialist/) skill. It bridges that skill's domain knowledge (query optimization, operational reviews, disaster recovery guidance, incident detection guidance, cost optimization) to the six tools exposed by the connected `awslabs.redshift-mcp-server` MCP server, and enforces one important behavior rule: it runs in the active chat session by default and never offers or silently switches to background execution — even for the multi-step Detailed Operational Review — unless the user explicitly asks for background mode after confirming the cluster/database scope.
+This custom agent is a lean orchestrator for the [`redshift-support-specialist`](../../skills/redshift-support-specialist/) skill. It bridges that skill's domain knowledge (query optimization, operational reviews, cost optimization) to the six tools exposed by the connected `awslabs.redshift-mcp-server` MCP server, and enforces one important behavior rule: it runs in the active chat session by default and never offers or silently switches to background execution — even for the multi-step Detailed Operational Review — unless the user explicitly asks for background mode after confirming the cluster/database scope.
 
 ## Key Capabilities
 
 - Diagnoses slow Redshift queries live (EXPLAIN plan, disk spill, distribution/sort key issues) with concrete SQL/config fixes
 - Runs a quick PASS/WARN/FAIL operational review using cluster inventory data
 - Runs a full Detailed Operational Review (storage, WLM, table design, Advisor recommendations) and produces both an in-chat Markdown summary and a downloadable HTML report
-- Offers disaster recovery and CloudWatch alarm guidance as reference material where live AWS CLI/CloudWatch access isn't available through the MCP server
 - Performs cost optimization analysis, including provisioned-to-serverless RPU sizing
 
 ## Important behavior note

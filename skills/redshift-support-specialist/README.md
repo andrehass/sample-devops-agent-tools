@@ -1,6 +1,6 @@
 # Amazon Redshift Support Specialist — AWS DevOps Agent Skill
 
-A self-contained solution for connecting [AWS DevOps Agent](https://docs.aws.amazon.com/devopsagent/latest/userguide/about-aws-devops-agent.html) to Amazon Redshift: this skill (query optimization, operational reviews, disaster recovery guidance, incident detection guidance, and cost optimization), plus a ready-to-use serverless deployment of the `awslabs.redshift-mcp-server` MCP server it relies on.
+A self-contained solution for connecting [AWS DevOps Agent](https://docs.aws.amazon.com/devopsagent/latest/userguide/about-aws-devops-agent.html) to Amazon Redshift: this skill (query optimization, operational reviews, and cost optimization), plus a ready-to-use serverless deployment of the `awslabs.redshift-mcp-server` MCP server it relies on.
 
 > ⚠️ **Non-production disclaimer:** This skill is sample code, not intended for production use without additional review and testing. Users should validate in a non-production environment first.
 
@@ -13,8 +13,7 @@ Amazon Redshift domain expertise for [AWS DevOps Agent](https://docs.aws.amazon.
 - **Query optimization** — diagnoses a specific slow query (EXPLAIN plan, disk spill, distribution/sort key issues) and returns concrete SQL/config fixes.
 - **High-level operational review** — quick PASS/WARN/FAIL health check using only `list_clusters` data.
 - **Detailed operational review** — full diagnostic sweep (storage, WLM, table design, Advisor recommendations) producing both a downloadable HTML report and an in-chat Markdown summary.
-- **Disaster recovery guidance** — reference checklist and RPO/RTO guidance for snapshot/backup posture (evaluated manually since AWS CLI access isn't available through the MCP server).
-- **Incident detection guidance** — recommended CloudWatch alarm set for provisioned clusters and Serverless workgroups.
+
 - **Cost optimization** — node/RPU right-sizing and serverless migration analysis using live table and workload data.
 
 ## Setup Overview
@@ -330,16 +329,6 @@ The agent will first ask you to confirm scope (which cluster/workgroup and datab
 
 Every report — HTML and Markdown — always includes the full section set: executive summary, cluster overview, all findings, WLM configuration, workload analysis, top queries by runtime, table design, Spectrum/external queries, data sharing, and prioritized recommendations. The "Cluster Level Review (Power-2)" section (CloudWatch metrics, SSL/audit config, support cases) is always marked "Not Available via MCP tools" since that data requires AWS CLI/CloudWatch access this skill doesn't have.
 
-#### Disaster Recovery Recommendations (reference guidance; live data needs user-supplied config — AWS CLI access not available via the MCP server)
-
-- "What's our disaster recovery posture for Redshift?"
-- "What RPO/RTO can I expect with my current snapshot schedule?"
-
-#### Incident Detection & Response (reference guidance; live data needs user-supplied config — CloudWatch access not available via the MCP server)
-
-- "What alarms should I have configured for my Redshift Serverless workgroup?"
-- "A query just failed with a disk-full error, what should I check?"
-
 #### Cost Optimization (partially live via MCP server; Reserved Instance/CloudWatch utilization data requires user input)
 
 - "Should I move this Redshift cluster to Serverless?"
@@ -364,7 +353,7 @@ redshift-support-specialist/
 ├── CHANGELOG.md                   # Required: version history
 ├── LICENSE                        # Apache-2.0
 ├── NOTICE
-├── references/                    # best practices, system tables guide, incident playbooks, etc.
+├── references/                    # best practices, system tables guide, review signals, etc.
 ├── assets/
 │   ├── config/thresholds.yaml     # signal thresholds for automated health checks
 │   ├── queries/                   # ready-to-run diagnostic SQL templates
@@ -379,7 +368,7 @@ Only `SKILL.md`, `references/`, `assets/`, and `evals/` are part of the [Agent S
 
 ## Limitations
 
-- **No AWS CLI or CloudWatch access.** Every Redshift interaction goes through the six MCP server tools only (`list_clusters`, `list_databases`, `list_schemas`, `list_tables`, `list_columns`, `execute_query`). Checks that require CloudWatch metrics/alarms, snapshot inventory, SSL/audit-log/parameter-group configuration, or Reserved Instance coverage are reported as "Not Available" rather than guessed — see Capabilities 4 and 5 in `SKILL.md`.
+- **No AWS CLI or CloudWatch access.** Every Redshift interaction goes through the six MCP server tools only (`list_clusters`, `list_databases`, `list_schemas`, `list_tables`, `list_columns`, `execute_query`). Checks that require CloudWatch metrics, snapshot inventory, SSL/audit-log/parameter-group configuration, or Reserved Instance coverage are reported as "Not Available" rather than guessed.
 - **Read-only.** `execute_query` runs inside a read-only transaction — the skill never runs INSERT/UPDATE/DELETE/ALTER/DROP/CREATE/GRANT/VACUUM/ANALYZE; it only recommends such statements for the user to run themselves.
 - **One query per `execute_query` call.** Diagnostics that need multiple result sets require multiple tool calls; there is no multi-statement/transaction support.
 - **No data retention.** Every session collects data fresh; nothing from a prior report or customer is cached or reused across sessions.
