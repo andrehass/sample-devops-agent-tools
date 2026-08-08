@@ -43,6 +43,7 @@ export class EksNodeLogMcpStack extends cdk.Stack {
       presignedUrlExpirationSeconds: props.presignedUrlExpirationSeconds,
       allowSelfManagedNodes: props.allowSelfManagedNodes,
       requireCollectionApproval: props.requireCollectionApproval,
+      approvalApproverArns: props.approvalApproverArns,
       approvalNotificationEmails: props.approvalNotificationEmails,
       approvalTtlSeconds: props.approvalTtlSeconds,
       vpcId: props.vpcId,

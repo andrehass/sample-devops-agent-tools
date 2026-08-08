@@ -19,8 +19,6 @@ import os
 import re
 import hashlib
 import time
-import uuid
-import secrets
 import signal
 import threading
 from contextlib import contextmanager
@@ -45,7 +43,6 @@ s3_client = boto3.client('s3', config=Config(signature_version='s3v4'))
 ec2_client = boto3.client('ec2')
 cloudwatch_client = boto3.client('cloudwatch')
 sns_client = boto3.client('sns')
-dynamodb_client = boto3.client('dynamodb')
 
 # Regional client cache to avoid re-creating clients per invocation
 _regional_clients: Dict[str, Dict[str, Any]] = {}
@@ -59,20 +56,28 @@ STACK_NAME = os.environ.get('STACK_NAME', 'EksNodeLogMcp')
 # ── Human-in-the-loop approval for mutating collection tools (M1/M2) ──
 # collect/batch_collect start SSM Automation on nodes. Rather than let an
 # autonomous (potentially poisoned) agent trigger that directly, the Lambda
-# creates a pending approval, notifies humans via SNS, and only runs the SSM
-# call after a human approves out-of-band. The approval is NOT a tool parameter
-# the agent can set — approval requires a secret token delivered only to humans.
-APPROVAL_TABLE_NAME = os.environ.get('APPROVAL_TABLE_NAME', '')
+# starts a wrapper SSM Automation document whose FIRST step is the native
+# `aws:approve` action. The execution pauses there until a designated human
+# approves it in the AWS Systems Manager console (or via
+# `ssm:SendAutomationSignal`) — only then does the document proceed to run the
+# actual log collection. Approval is NOT a tool parameter the agent can set:
+# the Lambda has no ssm:SendAutomationSignal permission, and the approvers are
+# fixed IAM principals baked in at deploy time.
 APPROVAL_TOPIC_ARN = os.environ.get('APPROVAL_TOPIC_ARN', '')
-APPROVAL_BASE_URL = os.environ.get('APPROVAL_BASE_URL', '')  # approve Function URL (opt-in; empty in CLI mode)
-APPROVAL_FUNCTION_NAME = os.environ.get('APPROVAL_FUNCTION_NAME', '')  # approval handler for direct IAM-auth invoke
+COLLECT_APPROVAL_DOCUMENT = os.environ.get('COLLECT_APPROVAL_DOCUMENT', '')
+BATCH_APPROVAL_DOCUMENT = os.environ.get('BATCH_APPROVAL_DOCUMENT', '')
+APPROVAL_APPROVERS = [
+    a.strip() for a in os.environ.get('APPROVAL_APPROVERS', '').split(',') if a.strip()
+]
+# True only when email subscriptions were created at deploy time — used to
+# phrase the pending-approval message honestly (an SNS publish to a topic with
+# zero subscribers "succeeds" but nobody is notified).
+APPROVAL_EMAILS_CONFIGURED = os.environ.get(
+    'APPROVAL_EMAILS_CONFIGURED', ''
+).strip().lower() in ('1', 'true', 'yes')
 REQUIRE_COLLECTION_APPROVAL = os.environ.get(
     'REQUIRE_COLLECTION_APPROVAL', 'true'
 ).strip().lower() in ('1', 'true', 'yes')
-try:
-    APPROVAL_TTL_SECONDS = int(os.environ.get('APPROVAL_TTL_SECONDS', '900'))
-except (ValueError, TypeError):
-    APPROVAL_TTL_SECONDS = 900
 
 
 def emit_metric(metric_name: str, value: float = 1.0, unit: str = 'Count',
@@ -412,7 +417,7 @@ ENABLED_RESTRICTED_TOOLS = set(
 )
 
 # NOTE: collect/batch_collect (mutating tools) are gated at runtime by the
-# human-in-the-loop approval workflow (see enforce_collection_approval), not by
+# human-in-the-loop approval workflow (a native SSM aws:approve step), not by
 # hiding them from the tool surface.
 
 
@@ -534,7 +539,7 @@ def validate_tool_authorization(tool_name: str, caller: Optional[Dict] = None) -
       (a) Restricted-tool opt-in (ENABLED_RESTRICTED_TOOLS).
       (b) Per-tool ACL keyed on Cognito client_id (TOOL_AUTHORIZATION).
     Mutating tools (collect/batch_collect) are gated separately at runtime by the
-    human approval workflow (enforce_collection_approval), not here.
+    human approval workflow (a native SSM aws:approve step), not here.
     Returns None if authorized, or an error_response dict if denied.
     """
     if tool_name in RESTRICTED_TOOLS and tool_name not in ENABLED_RESTRICTED_TOOLS:
@@ -3452,7 +3457,7 @@ def lambda_handler(event: Dict, context: Any) -> Dict:
 
     # Tool routing. collect/batch_collect are mutating (they start SSM Automation
     # on nodes); rather than hide them, they are gated at runtime by a human
-    # approval (M1/M2) — see enforce_collection_approval. Read/analysis tools run
+    # approval (M1/M2) — a native SSM aws:approve step. Read/analysis tools run
     # directly.
     tools = {
         # Core Operations (Tier 1)
@@ -3481,9 +3486,9 @@ def lambda_handler(event: Dict, context: Any) -> Dict:
         'get_sop': get_sop,
     }
 
-    # Strip any caller-supplied server-only fields (approval bypass, injected
-    # caller identity) so an agent cannot forge them, then inject the trusted
-    # caller identity extracted from the JWT for use by the approval workflow.
+    # Strip any caller-supplied server-only fields (injected caller identity)
+    # so an agent cannot forge them, then inject the trusted caller identity
+    # extracted from the JWT for use by the approval notifications.
     if isinstance(event, dict):
         for _k in [k for k in list(event.keys()) if isinstance(k, str) and k.startswith('_')]:
             event.pop(_k, None)
@@ -3628,203 +3633,304 @@ def error_response(status_code: int, message: str, details: Dict = None) -> Dict
 
 
 def _approval_configured() -> bool:
-    """True when the approval workflow infrastructure is wired up."""
-    return bool(APPROVAL_TABLE_NAME)
+    """True when the SSM-native approval workflow is wired up."""
+    return bool(COLLECT_APPROVAL_DOCUMENT and APPROVAL_APPROVERS)
 
 
-def create_collection_approval(tool_name: str, target: str, region: str, arguments: Dict) -> Dict:
+def console_automation_url(region: str, execution_id: str) -> str:
+    """Deep link to the SSM console page where approvers Approve/Deny an execution."""
+    return (
+        f'https://{region}.console.aws.amazon.com/systems-manager/automation/'
+        f'execution/{execution_id}?region={region}'
+    )
+
+
+def notify_approvers(tool_name: str, target: str, region: str, execution_id: str,
+                     arguments: Dict) -> None:
     """
-    Create a PENDING approval, notify approvers via SNS, and return a
-    'pending_approval' response for the agent. The approve/deny link carries a
-    one-time secret token that is delivered ONLY to humans (via SNS) — it is
-    never returned to the caller, so the agent cannot approve its own request.
+    Publish a rich notification with the SSM console deep link. This complements
+    the bare-bones notification the `aws:approve` step itself sends to the same
+    topic. Best-effort — the console approval card exists regardless.
     """
-    approval_id = uuid.uuid4().hex
-    token = secrets.token_urlsafe(32)
-    token_hash = hashlib.sha256(token.encode('utf-8')).hexdigest()
-    now = int(time.time())
-    ttl = now + APPROVAL_TTL_SECONDS
+    if not APPROVAL_TOPIC_ARN:
+        return
     requested_by = str(
         arguments.get('_caller_client_id')
         or arguments.get('_caller_sub')
         or 'unknown'
     )
-
-    dynamodb_client.put_item(
-        TableName=APPROVAL_TABLE_NAME,
-        Item={
-            'approvalId': {'S': approval_id},
-            'tokenHash': {'S': token_hash},
-            'tool': {'S': tool_name},
-            'target': {'S': target},
-            'region': {'S': region},
-            'status': {'S': 'PENDING'},
-            'requestedBy': {'S': requested_by},
-            'createdAt': {'N': str(now)},
-            'ttl': {'N': str(ttl)},
-        },
-    )
-
-    # Two delivery modes for the approve/deny action. The public Function URL
-    # is opt-in only: account guardrails can strip public Lambda policies and
-    # silently break the links, so the default is an IAM-authenticated direct
-    # invoke of the approval handler — no public endpoint involved.
-    if APPROVAL_BASE_URL:
-        base = APPROVAL_BASE_URL.rstrip('/')
-        approve_action = f"{base}/?approvalId={approval_id}&token={token}&decision=approve"
-        deny_action = f"{base}/?approvalId={approval_id}&token={token}&decision=deny"
-        action_hint = "The link contains a one-time secret — do not forward it."
-    elif APPROVAL_FUNCTION_NAME:
-        def _invoke_cmd(decision: str) -> str:
-            payload = json.dumps({
-                'approvalId': approval_id, 'token': token, 'decision': decision,
-            })
-            return (
-                f"aws lambda invoke --function-name {APPROVAL_FUNCTION_NAME} "
-                f"--region {DEFAULT_REGION} --cli-binary-format raw-in-base64-out "
-                f"--payload '{payload}' /dev/stdout"
-            )
-        approve_action = _invoke_cmd('approve')
-        deny_action = _invoke_cmd('deny')
-        action_hint = (
-            "Run the command with YOUR AWS credentials (requires lambda:InvokeFunction "
-            "on the approval handler). The payload contains a one-time secret — do not forward it."
+    try:
+        sns_client.publish(
+            TopicArn=APPROVAL_TOPIC_ARN,
+            Subject=f'[EKS Diag MCP] Approval needed: {tool_name} on {target}'[:100],
+            Message=(
+                f"An agent requested '{tool_name}', which starts SSM log collection on "
+                f"{target} (region {region}).\n\n"
+                f"Requested by client: {requested_by}\n"
+                f"Execution ID: {execution_id}\n\n"
+                f"Approve or deny in the AWS Systems Manager console:\n"
+                f"{console_automation_url(region, execution_id)}\n\n"
+                f"(You must be signed in as one of the designated approvers and have "
+                f"ssm:SendAutomationSignal permission. The execution stays paused at the "
+                f"approval step until you decide; it times out if nobody responds.)"
+            ),
         )
+    except Exception as e:
+        logger.error(f'Failed to publish approval notification: {e}')
+
+
+def _pending_approval_response(tool_name: str, target: str, region: str,
+                               execution_id: str, extra: Optional[Dict] = None) -> Dict:
+    """Standard 'pending human approval' response for approval-gated executions."""
+    url = console_automation_url(region, execution_id)
+    if APPROVAL_EMAILS_CONFIGURED:
+        notify_note = 'Approvers were also notified by email via SNS.'
     else:
-        approve_action = deny_action = '(approval endpoint not configured)'
-        action_hint = ''
-
-    if APPROVAL_TOPIC_ARN:
-        try:
-            sns_client.publish(
-                TopicArn=APPROVAL_TOPIC_ARN,
-                Subject=f'[EKS Diag MCP] Approval needed: {tool_name} on {target}'[:100],
-                Message=(
-                    f"An agent requested '{tool_name}', which starts SSM log collection on "
-                    f"{target} (region {region}).\n\n"
-                    f"Requested by client: {requested_by}\n"
-                    f"Approval ID: {approval_id}\n\n"
-                    f"APPROVE:\n{approve_action}\n\n"
-                    f"DENY:\n{deny_action}\n\n"
-                    f"This request expires in {APPROVAL_TTL_SECONDS // 60} minutes. "
-                    f"{action_hint}"
-                ),
-            )
-        except Exception as e:
-            logger.error(f'Failed to publish approval notification: {e}')
-
-    return success_response({
+        notify_note = (
+            'No email subscriptions are configured on the approval SNS topic, so '
+            'nobody is notified automatically — share the console link with an '
+            'approver directly.'
+        )
+    payload = {
         'status': 'pending_approval',
-        'approvalId': approval_id,
+        'executionId': execution_id,
         'tool': tool_name,
         'target': target,
         'region': region,
+        'approvalConsoleUrl': url,
         'message': (
-            f"'{tool_name}' requires human approval before it runs SSM on {target}. "
-            f"An approval request was sent to the operators. Once a human approves it, "
-            f"re-call {tool_name} with the SAME arguments plus approvalId=\"{approval_id}\"."
+            f"'{tool_name}' requires human approval before SSM log collection runs on "
+            f"{target}. The SSM Automation execution has started and is PAUSED at a "
+            f"native aws:approve step. A designated approver must approve it in the "
+            f"AWS Systems Manager console: {url} — {notify_note} "
+            f"Once approved, collection proceeds automatically."
         ),
-        'expiresInSeconds': APPROVAL_TTL_SECONDS,
+        'humanApproval': {
+            'state': 'pending',
+            'consoleUrl': url,
+            'howToApprove': (
+                'Open the console link, review the request, and choose Approve or Deny '
+                'on the waitForHumanApproval step (or run: aws ssm send-automation-signal '
+                f'--automation-execution-id {execution_id} --signal-type Approve '
+                f'--region {region}).'
+            ),
+        },
+        'suggestedPollIntervalSeconds': 30,
+        'polling': {
+            'intervalSeconds': 30,
+            'maxAttempts': 10,
+            'serverSideWaitSeconds': APPROVAL_WAIT_SECONDS,
+            'onExhausted': 'stop polling and ask the user to get the request approved',
+        },
         'nextStep': (
-            f'Wait for a human to approve, then call {tool_name}(..., '
-            f'approvalId="{approval_id}"). Re-calling before approval returns pending.'
+            f'Share the console link with an approver, then call '
+            f'status(executionId="{execution_id}") repeatedly, up to 10 times. Each call '
+            f'waits up to {APPROVAL_WAIT_SECONDS}s server-side while approval is pending, '
+            f'so just call again immediately after each response — do NOT stop and wait '
+            f'for the user to confirm approval. Collection continues automatically once '
+            f'approved (no re-call of {tool_name} is needed). If humanApproval.state is '
+            f'still "pending" after 10 calls, stop and ask the user to get it approved.'
         ),
-    })
+        'task': {
+            'taskId': execution_id,
+            'state': 'running',
+            'message': 'Waiting for human approval in the AWS Systems Manager console',
+            'progress': 0,
+        },
+    }
+    if extra:
+        payload.update(extra)
+    return success_response(payload)
 
 
-def consume_collection_approval(approval_id: str, tool_name: str, target: str) -> Optional[Dict]:
+def enforce_approval_preconditions(target_region: str) -> Optional[Dict]:
     """
-    Validate and atomically consume an approval. Returns None when the request
-    is approved and may proceed, otherwise a response dict (pending / denied /
-    expired / mismatched / already-used) to return to the caller.
+    Fail-closed checks for the approval-gated path (M1/M2). Returns None when the
+    wrapper document can be started, or an error response.
     """
-    try:
-        resp = dynamodb_client.get_item(
-            TableName=APPROVAL_TABLE_NAME,
-            Key={'approvalId': {'S': approval_id}},
-        )
-    except Exception as e:
-        return error_response(500, f'Failed to look up approval: {e}')
-
-    item = resp.get('Item')
-    if not item:
-        return error_response(
-            403,
-            f'Unknown or expired approvalId. Request a new approval by calling '
-            f'{tool_name} without an approvalId.',
-        )
-
-    if item.get('tool', {}).get('S') != tool_name or item.get('target', {}).get('S') != target:
-        return error_response(
-            403,
-            'approvalId does not match this tool and target. Request a fresh approval.',
-        )
-
-    now = int(time.time())
-    ttl = int(item.get('ttl', {}).get('N', '0') or 0)
-    if ttl and now > ttl:
-        return error_response(403, 'This approval has expired. Request a new one.')
-
-    status = item.get('status', {}).get('S', '')
-    if status == 'PENDING':
-        return success_response({
-            'status': 'pending_approval',
-            'approvalId': approval_id,
-            'message': 'Approval is still pending. Ask an approver to use the link, then retry.',
-            'nextStep': f'Retry {tool_name}(..., approvalId="{approval_id}") after approval.',
-        })
-    if status == 'DENIED':
-        return error_response(403, 'This request was denied by an approver.')
-    if status == 'CONSUMED':
-        return error_response(403, 'This approval was already used (approvals are single-use). Request a new one.')
-    if status != 'APPROVED':
-        return error_response(403, f'Approval is not usable (status={status}).')
-
-    # Atomically flip APPROVED -> CONSUMED so an approval can be used only once.
-    try:
-        dynamodb_client.update_item(
-            TableName=APPROVAL_TABLE_NAME,
-            Key={'approvalId': {'S': approval_id}},
-            UpdateExpression='SET #s = :consumed',
-            ConditionExpression='#s = :approved',
-            ExpressionAttributeNames={'#s': 'status'},
-            ExpressionAttributeValues={
-                ':consumed': {'S': 'CONSUMED'},
-                ':approved': {'S': 'APPROVED'},
-            },
-        )
-    except dynamodb_client.exceptions.ConditionalCheckFailedException:
-        return error_response(403, 'This approval was already used or changed state. Request a new one.')
-    except Exception as e:
-        return error_response(500, f'Failed to consume approval: {e}')
-
-    return None  # approved and consumed — caller may proceed
-
-
-def enforce_collection_approval(tool_name: str, target: str, region: str, arguments: Dict) -> Optional[Dict]:
-    """
-    Approval gate for mutating collection tools (M1/M2). Returns None when the
-    call may proceed (approval disabled, or a valid approval was consumed), or a
-    response dict (pending / denied / error) that the caller must return as-is.
-    """
-    # Internal bypass: set ONLY by server-side code (e.g. batch_collect after it
-    # obtained one approval for the whole batch). Caller-supplied '_'-prefixed
-    # keys are stripped by the handler, so an agent cannot forge this.
-    if arguments.get('_approval_bypass') is True:
-        return None
-    if not REQUIRE_COLLECTION_APPROVAL:
-        return None
     if not _approval_configured():
-        # Fail closed: approval is required but the workflow isn't configured.
         return error_response(
             503,
             'Human approval is required for collection, but the approval workflow is not '
-            'configured (APPROVAL_TABLE_NAME/APPROVAL_TOPIC_ARN unset). Contact the operator.',
+            'configured (COLLECT_APPROVAL_DOCUMENT/APPROVAL_APPROVERS unset). '
+            'Contact the operator.',
         )
-    approval_id = arguments.get('approvalId')
-    if not approval_id:
-        return create_collection_approval(tool_name, target, region, arguments)
-    return consume_collection_approval(approval_id, tool_name, target)
+    if target_region != DEFAULT_REGION:
+        return error_response(
+            400,
+            f'Approval-gated collection is only available in {DEFAULT_REGION}: the '
+            f'approval wrapper document is a regional SSM document deployed with this '
+            f'stack. Requested region: {target_region}. Deploy the stack in that region, '
+            f'or (test deployments only) set REQUIRE_COLLECTION_APPROVAL=false.',
+        )
+    return None
+
+
+def start_collection_with_approval(instance_id: str, target_region: str,
+                                   arguments: Dict) -> Dict:
+    """
+    Start the approval-gated wrapper automation for a single instance. The
+    wrapper pauses at aws:approve until a human approves in the SSM console,
+    then runs AWSSupport-CollectEKSInstanceLogs automatically.
+    """
+    regional_ssm = get_regional_client('ssm', target_region)
+    try:
+        response = regional_ssm.start_automation_execution(
+            DocumentName=COLLECT_APPROVAL_DOCUMENT,
+            Parameters={
+                'EKSInstanceId': [instance_id],
+                'LogDestination': [LOGS_BUCKET],
+                'AutomationAssumeRole': [SSM_AUTOMATION_ROLE_ARN],
+                'Approvers': APPROVAL_APPROVERS,
+                'SNSTopicArn': [APPROVAL_TOPIC_ARN],
+            },
+        )
+    except Exception as e:
+        return error_response(500, f'Failed to start approval-gated collection: {str(e)}')
+
+    execution_id = response['AutomationExecutionId']
+
+    idempotency_token = arguments.get('idempotencyToken')
+    if idempotency_token:
+        store_idempotency_mapping(instance_id, idempotency_token, execution_id)
+    store_execution_region(execution_id, target_region)
+
+    notify_approvers('collect', instance_id, target_region, execution_id, arguments)
+    return _pending_approval_response(
+        'collect', instance_id, target_region, execution_id,
+        extra={'instanceId': instance_id, 's3Bucket': LOGS_BUCKET},
+    )
+
+
+# ── Wrapper-execution status helpers (used by status/batch_status) ──
+
+APPROVAL_STEP_NAME = 'waitForHumanApproval'
+
+# Server-side long-poll budget while an approval is pending. Agents generally
+# cannot sleep between tool calls, so the status tools hold the request open
+# for up to this long (checking SSM every APPROVAL_WAIT_CHECK_SECONDS) before
+# responding — back-to-back agent polls are then naturally paced ~30s apart,
+# and the response returns early the moment a human decides.
+APPROVAL_WAIT_SECONDS = 25
+APPROVAL_WAIT_CHECK_SECONDS = 5
+
+
+def _approval_step_pending(execution: Dict) -> bool:
+    """True while the wrapper execution is paused at the aws:approve step."""
+    for step in execution.get('StepExecutions', []) or []:
+        if step.get('StepName') == APPROVAL_STEP_NAME:
+            return step.get('StepStatus') in ('Pending', 'InProgress', 'Waiting')
+    return False
+
+
+def wait_for_approval_decision(regional_ssm, execution_id: str, execution: Dict) -> Dict:
+    """
+    Long-poll SSM while the approval is pending, up to APPROVAL_WAIT_SECONDS.
+    Returns the most recent execution snapshot (early when a human decides).
+    """
+    deadline = time.time() + APPROVAL_WAIT_SECONDS
+    latest = execution
+    while _approval_step_pending(latest) and time.time() < deadline:
+        time.sleep(APPROVAL_WAIT_CHECK_SECONDS)
+        try:
+            latest = regional_ssm.get_automation_execution(
+                AutomationExecutionId=execution_id
+            )['AutomationExecution']
+        except Exception:
+            break  # transient read error — return what we have
+    return latest
+
+
+def _is_approval_wrapper(document_name: str) -> bool:
+    """True when an execution was started from one of the approval wrapper docs."""
+    if not document_name:
+        return False
+    return document_name in (COLLECT_APPROVAL_DOCUMENT, BATCH_APPROVAL_DOCUMENT)
+
+
+def _step_output_values(step: Dict, key: str) -> List[str]:
+    """Extract a list-valued output from a StepExecution, defensively."""
+    outputs = step.get('Outputs', {}) or {}
+    values = outputs.get(key, [])
+    return [v for v in values if isinstance(v, str)]
+
+
+def augment_wrapper_status(execution: Dict, result: Dict, target_region: str) -> None:
+    """
+    Enrich a status result for an approval-wrapper execution: expose the human
+    approval state (pending / approved / denied-or-expired), the SSM console
+    deep link, and the child collection execution id once the approval clears.
+    Mutates `result` in place.
+    """
+    execution_id = execution.get('AutomationExecutionId', result.get('executionId', ''))
+    url = console_automation_url(target_region, execution_id)
+    steps = execution.get('StepExecutions', []) or []
+    approve_step = next((s for s in steps if s.get('StepName') == APPROVAL_STEP_NAME), None)
+    if approve_step is None:
+        return
+
+    approve_status = approve_step.get('StepStatus', '')
+
+    if approve_status in ('Pending', 'InProgress', 'Waiting'):
+        result['humanApproval'] = {
+            'state': 'pending',
+            'consoleUrl': url,
+            'message': 'Waiting for a human to approve in the AWS Systems Manager console.',
+        }
+        result['suggestedPollIntervalSeconds'] = 30
+        result['polling'] = {
+            'intervalSeconds': 30,
+            'maxAttempts': 10,
+            'serverSideWaitSeconds': APPROVAL_WAIT_SECONDS,
+            'onExhausted': 'stop polling and ask the user to get the request approved',
+        }
+        result['nextStep'] = (
+            f'A human must approve in the SSM console ({url}). '
+            f'Call status again immediately (each call already waits up to '
+            f'{APPROVAL_WAIT_SECONDS}s server-side while pending), up to 10 calls total '
+            f'without waiting for the user; if still pending after that, stop and ask '
+            f'the user to get the request approved.'
+        )
+        if 'task' in result:
+            result['task']['message'] = 'Waiting for human approval in the SSM console'
+        return
+
+    if approve_status in ('Failed', 'TimedOut', 'Cancelled'):
+        result['humanApproval'] = {
+            'state': 'denied_or_expired',
+            'consoleUrl': url,
+            'message': (
+                'The approval was denied by an approver or timed out without a decision. '
+                'No collection ran.'
+            ),
+        }
+        result['nextStep'] = 'Re-call collect to request a fresh approval if still needed.'
+        if 'task' in result:
+            result['task']['state'] = 'failed'
+            result['task']['message'] = 'Human approval denied or expired — collection did not run'
+        return
+
+    # Approved — surface child execution id(s) from the post-approval step(s)
+    result['humanApproval'] = {'state': 'approved', 'consoleUrl': url}
+    for step in steps:
+        if step.get('StepName') == APPROVAL_STEP_NAME:
+            continue
+        child_ids = _step_output_values(step, 'ExecutionId')
+        if child_ids:
+            result['childExecutionId'] = child_ids[0]
+        batch_children = _step_output_values(step, 'Executions')
+        if batch_children:
+            result['childExecutions'] = _parse_batch_children(batch_children)
+
+
+def _parse_batch_children(raw_entries: List[str]) -> List[Dict]:
+    """Parse 'instanceId|executionId' entries emitted by the batch fan-out step."""
+    children = []
+    for entry in raw_entries:
+        if '|' in entry:
+            iid, _, eid = entry.partition('|')
+            children.append({'instanceId': iid.strip(), 'executionId': eid.strip()})
+    return children
 
 
 def start_log_collection(arguments: Dict) -> Dict:
@@ -3894,11 +4000,16 @@ def start_log_collection(arguments: Dict) -> Dict:
                 'idempotent': True
             })
 
-    # Human-in-the-loop approval gate (M1). Blocks the SSM call until a human
-    # approves out-of-band. Returns a 'pending_approval' response on first call.
-    approval_response = enforce_collection_approval('collect', instance_id, target_region, arguments)
-    if approval_response is not None:
-        return approval_response
+    # Human-in-the-loop approval gate (M1). When enabled, collection runs via a
+    # wrapper document whose FIRST step is the native aws:approve action — the
+    # execution pauses inside SSM until a designated human approves it in the
+    # Systems Manager console, then the collection step runs automatically.
+    # The agent only needs to poll status(); no second collect call is required.
+    if REQUIRE_COLLECTION_APPROVAL:
+        precondition_error = enforce_approval_preconditions(target_region)
+        if precondition_error is not None:
+            return precondition_error
+        return start_collection_with_approval(instance_id, target_region, arguments)
 
     try:
         # Start SSM Automation in the target region
@@ -3988,7 +4099,14 @@ def get_collection_status(arguments: Dict) -> Dict:
             AutomationExecutionId=execution_id
         )
         execution = response['AutomationExecution']
-        
+
+        # Approval-wrapper executions: hold the request open (server-side
+        # long-poll) while the aws:approve step is pending, so agent polls are
+        # paced ~30s apart even when the agent cannot sleep between calls.
+        if (_is_approval_wrapper(execution.get('DocumentName', ''))
+                and _approval_step_pending(execution)):
+            execution = wait_for_approval_decision(regional_ssm, execution_id, execution)
+
         status = execution['AutomationExecutionStatus']
         
         result = {
@@ -4053,7 +4171,12 @@ def get_collection_status(arguments: Dict) -> Dict:
             'message': result.get('failureReason', f'SSM status: {status}'),
             'progress': result.get('progress', 0),
         }
-        
+
+        # Approval-wrapper executions: expose the human-approval state (pending /
+        # approved / denied), the SSM console deep link, and child execution ids.
+        if _is_approval_wrapper(result.get('documentName', '')):
+            augment_wrapper_status(execution, result, target_region)
+
         return success_response({'automation': result})
         
     except regional_ssm.exceptions.AutomationExecutionNotFoundException:
@@ -6560,26 +6683,90 @@ def batch_collect(arguments: Dict) -> Dict:
                 'message': f'{len(filtered_nodes)} nodes grouped into {len(bucket_list)} buckets. Will collect from {total_planned} representative nodes. Re-run with dryRun=false to proceed.',
             })
 
-        # M2: a single human approval authorizes the whole batch (target = the
-        # cluster). Only reached for real execution — dry runs returned above.
-        approval_response = enforce_collection_approval('batch_collect', cluster_name, target_region, arguments)
-        if approval_response is not None:
-            return approval_response
-
-        # 7. Execute collections
+        # 7. Real execution — dry runs returned above.
         batch_id = hashlib.sha256(f"{cluster_name}-{datetime.utcnow().isoformat()}".encode(), usedforsecurity=False).hexdigest()[:12]
+        sampled_ids = [iid for bucket in bucket_list for iid in bucket['sampleNodes']]
+
+        # M2: when approval is required, start the batch wrapper document ONCE.
+        # Its first step is the native aws:approve action — a single human
+        # approval in the SSM console authorizes the whole batch — then an
+        # aws:executeScript step fans out one collection per sampled node.
+        if REQUIRE_COLLECTION_APPROVAL:
+            precondition_error = enforce_approval_preconditions(target_region)
+            if precondition_error is not None:
+                return precondition_error
+            if not BATCH_APPROVAL_DOCUMENT:
+                return error_response(
+                    503,
+                    'Human approval is required but the batch approval document is not '
+                    'configured (BATCH_APPROVAL_DOCUMENT unset). Contact the operator.',
+                )
+            try:
+                wrapper_resp = regional_ssm.start_automation_execution(
+                    DocumentName=BATCH_APPROVAL_DOCUMENT,
+                    Parameters={
+                        'InstanceIds': sampled_ids,
+                        'LogDestination': [LOGS_BUCKET],
+                        'AutomationAssumeRole': [SSM_AUTOMATION_ROLE_ARN],
+                        'Approvers': APPROVAL_APPROVERS,
+                        'SNSTopicArn': [APPROVAL_TOPIC_ARN],
+                    },
+                )
+            except Exception as e:
+                return error_response(500, f'Failed to start approval-gated batch collection: {str(e)}')
+
+            batch_execution_id = wrapper_resp['AutomationExecutionId']
+            store_execution_region(batch_execution_id, target_region)
+            try:
+                s3_client.put_object(
+                    Bucket=LOGS_BUCKET,
+                    Key=f"batches/{batch_id}/metadata.json",
+                    Body=json.dumps({
+                        'batchId': batch_id,
+                        'clusterName': cluster_name,
+                        'region': target_region,
+                        'createdAt': datetime.utcnow().isoformat(),
+                        'approvalExecutionId': batch_execution_id,
+                        'plannedInstanceIds': sampled_ids,
+                        'buckets': bucket_list,
+                        'executions': [],
+                    }, default=str),
+                    ContentType='application/json',
+                )
+            except Exception:
+                pass
+
+            notify_approvers('batch_collect', cluster_name, target_region, batch_execution_id, arguments)
+            return _pending_approval_response(
+                'batch_collect', cluster_name, target_region, batch_execution_id,
+                extra={
+                    'batchId': batch_id,
+                    'clusterName': cluster_name,
+                    'plannedCollections': total_planned,
+                    'plannedInstanceIds': sampled_ids,
+                    'buckets': bucket_list,
+                    'nextStep': (
+                        f'A single human approval in the SSM console authorizes the whole '
+                        f'batch ({total_planned} nodes). Poll batch_status(batchId='
+                        f'"{batch_id}") every 30 seconds, up to 10 attempts, without '
+                        f'waiting for the user — the fan-out happens automatically after '
+                        f'approval. If still pending after 10 attempts, stop polling and '
+                        f'ask the user to get the request approved.'
+                    ),
+                },
+            )
+
+        # Approval disabled (supervised/test deployments): fan out directly.
         executions = []
 
         for bucket in bucket_list:
             for iid in bucket['sampleNodes']:
                 try:
-                    # Reuse existing collect logic. The batch already carries one
-                    # human approval, so bypass the per-instance approval gate.
+                    # Reuse existing collect logic.
                     collect_args = {
                         'instanceId': iid,
                         'region': target_region,
                         'idempotencyToken': f"batch-{batch_id}-{iid}",
-                        '_approval_bypass': True,
                     }
                     result = start_log_collection(collect_args)
                     result_body = json.loads(result.get('body', '{}'))
@@ -6667,6 +6854,7 @@ def batch_status(arguments: Dict) -> Dict:
     batch_id = arguments.get('batchId')
 
     # If batchId provided, load execution IDs from stored metadata
+    meta = None
     if batch_id and not execution_ids:
         try:
             meta_result = safe_s3_read(f"batches/{batch_id}/metadata.json")
@@ -6678,6 +6866,79 @@ def batch_status(arguments: Dict) -> Dict:
                 ]
         except Exception:
             pass
+
+    # Approval-gated batches: a wrapper execution owns the approval + fan-out.
+    # Resolve its state — pending approval, denied, or fan-out child executions.
+    if not execution_ids and meta and meta.get('approvalExecutionId'):
+        wrapper_id = meta['approvalExecutionId']
+        wrapper_region = meta.get('region', DEFAULT_REGION)
+        try:
+            wrapper_ssm = get_regional_client('ssm', wrapper_region)
+            wrapper_exec = wrapper_ssm.get_automation_execution(
+                AutomationExecutionId=wrapper_id
+            )['AutomationExecution']
+        except Exception as e:
+            return error_response(500, f'Failed to look up batch approval execution: {str(e)}')
+
+        # Server-side long-poll while the batch approval is pending (see
+        # wait_for_approval_decision) so agent polls are paced ~30s apart.
+        if _approval_step_pending(wrapper_exec):
+            wrapper_exec = wait_for_approval_decision(wrapper_ssm, wrapper_id, wrapper_exec)
+
+        probe: Dict = {'executionId': wrapper_id}
+        augment_wrapper_status(wrapper_exec, probe, wrapper_region)
+        approval = probe.get('humanApproval', {})
+
+        if approval.get('state') == 'pending':
+            return success_response({
+                'allComplete': False,
+                'batchId': batch_id,
+                'status': 'pending_approval',
+                'approvalExecutionId': wrapper_id,
+                'humanApproval': approval,
+                'approvalConsoleUrl': approval.get('consoleUrl'),
+                'suggestedPollIntervalSeconds': 30,
+                'polling': {
+                    'intervalSeconds': 30,
+                    'maxAttempts': 10,
+                    'serverSideWaitSeconds': APPROVAL_WAIT_SECONDS,
+                    'onExhausted': 'stop polling and ask the user to get the request approved',
+                },
+                'nextStep': (
+                    'A human must approve the batch in the AWS Systems Manager console '
+                    f"({approval.get('consoleUrl')}). Call batch_status again immediately "
+                    f'(each call already waits up to {APPROVAL_WAIT_SECONDS}s server-side '
+                    f'while pending), up to 10 calls total without waiting for the user; '
+                    f'if still pending after that, stop and ask the user to get the '
+                    f'request approved.'
+                ),
+            })
+        if approval.get('state') == 'denied_or_expired':
+            return success_response({
+                'allComplete': True,
+                'batchId': batch_id,
+                'status': 'denied_or_expired',
+                'approvalExecutionId': wrapper_id,
+                'humanApproval': approval,
+                'nextStep': 'Approval was denied or expired — no collections ran. '
+                            'Re-run batch_collect if still needed.',
+            })
+
+        execution_ids = [
+            c['executionId'] for c in probe.get('childExecutions', [])
+            if c.get('executionId')
+        ]
+        if not execution_ids:
+            return success_response({
+                'allComplete': False,
+                'batchId': batch_id,
+                'status': wrapper_exec.get('AutomationExecutionStatus', 'InProgress'),
+                'approvalExecutionId': wrapper_id,
+                'humanApproval': approval,
+                'message': 'Approved — the fan-out step is starting child collections.',
+                'suggestedPollIntervalSeconds': 15,
+                'nextStep': 'Poll batch_status again in 15 seconds.',
+            })
 
     if not execution_ids:
         return error_response(400, 'executionIds list or batchId is required')
@@ -6697,7 +6958,7 @@ def batch_status(arguments: Dict) -> Dict:
             status = execution['AutomationExecutionStatus']
             # Extract instanceId from parameters
             params = execution.get('Parameters', {})
-            instance_id = params.get('InstanceId', [None])[0] if params.get('InstanceId') else None
+            instance_id = (params.get('EKSInstanceId') or params.get('InstanceId') or [None])[0]
             return {
                 'executionId': eid,
                 'instanceId': instance_id,

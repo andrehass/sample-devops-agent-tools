@@ -10,7 +10,7 @@ import * as kms from 'aws-cdk-lib/aws-kms';
 import * as logs from 'aws-cdk-lib/aws-logs';
 import * as cloudwatch from 'aws-cdk-lib/aws-cloudwatch';
 import * as ec2 from 'aws-cdk-lib/aws-ec2';
-import * as dynamodb from 'aws-cdk-lib/aws-dynamodb';
+import * as ssm from 'aws-cdk-lib/aws-ssm';
 import * as sns from 'aws-cdk-lib/aws-sns';
 import * as subscriptions from 'aws-cdk-lib/aws-sns-subscriptions';
 import { Construct } from 'constructs';
@@ -92,37 +92,38 @@ export interface SsmAutomationGatewayV2Props {
   /**
    * Require human-in-the-loop approval before the mutating collection tools
    * (`collect`, `batch_collect`) start SSM Automation on nodes (security review
-   * M1/M2). When true, a call creates a pending approval and notifies approvers
-   * via SNS; the SSM execution only runs after a human approves out-of-band via
-   * the approval Function URL. Approval is NOT a tool parameter the agent can
-   * set — the approve link carries a one-time secret delivered only to humans.
+   * M1/M2). When true, collection runs through a wrapper SSM Automation document
+   * whose FIRST step is the native `aws:approve` action: the execution pauses
+   * inside SSM until one of the designated approvers approves it in the Systems
+   * Manager console (or via `ssm:SendAutomationSignal`), then the collection
+   * step runs automatically. Approval is NOT a tool parameter the agent can
+   * set — the MCP Lambda has no `ssm:SendAutomationSignal` permission, so it
+   * cannot approve its own requests.
    * @default true
    */
   readonly requireCollectionApproval?: boolean;
 
   /**
-   * Expose a public (authType NONE) Lambda Function URL so approvers can
-   * approve/deny with a one-click link. Default false: some accounts run
-   * guardrails (SCPs or mitigation services) that strip public Lambda
-   * resource policies, which silently breaks the link with a "Forbidden"
-   * response. When false, no public endpoint is created — the SNS
-   * notification instead contains an IAM-authenticated `aws lambda invoke`
-   * command the approver runs with their own credentials.
-   * @default false
+   * IAM principals allowed to approve collection requests (IAM user ARNs, IAM
+   * role ARNs, or IAM usernames — passed to the `aws:approve` step's Approvers
+   * field). REQUIRED when `requireCollectionApproval` is true (the default);
+   * synth fails without it so a deployment can never silently lack approvers.
+   * Approvers also need `ssm:SendAutomationSignal` to click Approve/Deny.
    */
-  readonly approvalViaPublicUrl?: boolean;
+  readonly approvalApproverArns?: string[];
 
   /**
    * Email addresses subscribed to the collection-approval SNS topic. Each
-   * receives the approve/deny link when a collection is requested. (You can also
-   * subscribe Slack/PagerDuty/etc. to the topic out of band.)
+   * receives a notification with the SSM console approval link when a
+   * collection is requested. (You can also subscribe Slack/PagerDuty/etc. to
+   * the topic out of band.)
    * @default [] (no email subscriptions created; subscribe to the topic yourself)
    */
   readonly approvalNotificationEmails?: string[];
 
   /**
-   * How long (seconds) a pending collection approval remains valid before it
-   * expires and must be re-requested.
+   * How long (seconds) the `aws:approve` step waits for a human decision before
+   * the execution times out and must be re-requested.
    * @default 900 (15 minutes)
    */
   readonly approvalTtlSeconds?: number;
@@ -225,7 +226,6 @@ export class SsmAutomationGatewayV2Construct extends Construct {
   public readonly gatewayExecutionRole: iam.Role;
   public readonly encryptionKey?: kms.Key;
   public readonly sopBucket: s3.Bucket;
-  public readonly collectionApprovalTable: dynamodb.Table;
   public readonly collectionApprovalTopic: sns.Topic;
 
   constructor(scope: Construct, id: string, props: SsmAutomationGatewayV2Props = {}) {
@@ -512,13 +512,16 @@ export class SsmAutomationGatewayV2Construct extends Construct {
       }
     }
 
-    // Grant SSM Default Host Management role KMS encrypt access for log uploads
+    // Grant SSM Default Host Management role KMS access for log uploads.
+    // kms:Decrypt is required in addition to GenerateDataKey/Encrypt: bundles
+    // over the AWS CLI's 8 MiB threshold use S3 multipart upload, and multipart
+    // to an SSE-KMS bucket needs kms:Decrypt (UploadPart fails without it).
     if (this.encryptionKey && props.ssmDefaultHostRoleArn) {
       this.encryptionKey.addToResourcePolicy(new iam.PolicyStatement({
         sid: 'AllowSSMDefaultHostRoleEncrypt',
         effect: iam.Effect.ALLOW,
         principals: [new iam.ArnPrincipal(props.ssmDefaultHostRoleArn)],
-        actions: ['kms:GenerateDataKey', 'kms:Encrypt'],
+        actions: ['kms:GenerateDataKey', 'kms:Encrypt', 'kms:Decrypt'],
         resources: ['*'],
       }));
     }
@@ -892,27 +895,36 @@ export class SsmAutomationGatewayV2Construct extends Construct {
       .join(';');
 
     // ── Human-in-the-loop approval for mutating collection tools (M1/M2) ──
+    //
+    // SSM-native design: collection runs through wrapper Automation documents
+    // whose FIRST step is the `aws:approve` action. The execution pauses inside
+    // SSM until a designated approver clicks Approve/Deny in the Systems
+    // Manager console (or calls ssm:SendAutomationSignal); only then does the
+    // document proceed to run AWSSupport-CollectEKSInstanceLogs. Approval state
+    // lives entirely in SSM — no custom tokens, endpoints, or tables — and
+    // every decision is CloudTrail-audited. The MCP Lambda deliberately has NO
+    // ssm:SendAutomationSignal permission, so a poisoned agent cannot approve
+    // its own requests.
     const requireCollectionApproval = props.requireCollectionApproval ?? true;
     const approvalTtlSeconds = props.approvalTtlSeconds ?? 900;
+    const approverArns = props.approvalApproverArns ?? [];
 
-    // Stores pending/approved collection requests. approvalId is a random,
-    // server-generated id; the secret approve token is stored only as a hash.
-    // DynamoDB TTL auto-expires stale requests.
-    const approvalTable = new dynamodb.Table(this, 'CollectionApprovalTable', {
-      partitionKey: { name: 'approvalId', type: dynamodb.AttributeType.STRING },
-      billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
-      timeToLiveAttribute: 'ttl',
-      pointInTimeRecovery: true,
-      encryption: props.enableEncryption === false
-        ? dynamodb.TableEncryption.AWS_MANAGED
-        : dynamodb.TableEncryption.CUSTOMER_MANAGED,
-      encryptionKey: props.enableEncryption === false ? undefined : this.encryptionKey,
-      removalPolicy: cdk.RemovalPolicy.DESTROY,
-    });
-    this.collectionApprovalTable = approvalTable;
+    // Fail-closed at synth: an approval-gated deployment without approvers
+    // would leave every collection stuck at the approve step forever.
+    if (requireCollectionApproval && approverArns.length === 0) {
+      throw new Error(
+        'SsmAutomationGatewayV2: `requireCollectionApproval` is enabled (the default) ' +
+        'but `approvalApproverArns` is empty. Provide the IAM users/roles allowed to ' +
+        'approve collections (APPROVAL_APPROVER_ARNS env var), or explicitly set ' +
+        '`requireCollectionApproval: false` for a fully supervised/test deployment.',
+      );
+    }
 
-    // Approvers are notified here with the approve/deny link.
+    // Approvers are notified here with the SSM console approval link. SSM
+    // requires Automation-approval notification topics to be named with an
+    // "Automation" prefix.
     const approvalTopic = new sns.Topic(this, 'CollectionApprovalTopic', {
+      topicName: `Automation-${cdk.Stack.of(this).stackName}-approvals`,
       displayName: 'EKS Diagnostics MCP - collection approvals',
       masterKey: props.enableEncryption === false ? undefined : this.encryptionKey,
     });
@@ -921,56 +933,206 @@ export class SsmAutomationGatewayV2Construct extends Construct {
     }
     this.collectionApprovalTopic = approvalTopic;
 
-    // Approve/deny endpoint. Public Function URL (authType NONE) whose security
-    // is the one-time high-entropy token in the link (a capability URL) - the
-    // agent never receives that token, so it cannot approve its own requests.
-    const approvalHandlerRole = new iam.Role(this, 'ApprovalHandlerRole', {
-      assumedBy: new iam.ServicePrincipal('lambda.amazonaws.com'),
-      managedPolicies: [
-        iam.ManagedPolicy.fromAwsManagedPolicyName('service-role/AWSLambdaBasicExecutionRole'),
-      ],
-    });
-    approvalTable.grantReadWriteData(approvalHandlerRole);
-
-    const approvalHandlerFunction = new lambda.Function(this, 'ApprovalHandlerFunction', {
-      functionName: `${cdk.Stack.of(this).stackName}-collection-approval`,
-      runtime: lambda.Runtime.PYTHON_3_11,
-      handler: 'index.handler',
-      role: approvalHandlerRole,
-      timeout: cdk.Duration.seconds(30),
-      memorySize: 128,
-      environment: {
-        APPROVAL_TABLE_NAME: approvalTable.tableName,
+    // The wrapper automation runs as the SSM automation role: the aws:approve
+    // step publishes its notification to the topic, and the batch fan-out step
+    // starts child automations passing the same role.
+    approvalTopic.grantPublish(this.ssmAutomationRole);
+    this.ssmAutomationRole.addToPolicy(new iam.PolicyStatement({
+      sid: 'PassSelfToChildAutomations',
+      effect: iam.Effect.ALLOW,
+      actions: ['iam:PassRole'],
+      resources: [this.ssmAutomationRole.roleArn],
+      conditions: {
+        StringEquals: {
+          'iam:PassedToService': 'ssm.amazonaws.com',
+        },
       },
-      code: lambda.Code.fromInline(this.getApprovalHandlerCode()),
-    });
-    // Public URL is opt-in (see approvalViaPublicUrl). Default is the
-    // IAM-authenticated direct-invoke path, which needs no resource policy
-    // and therefore survives account guardrails that block public Lambdas.
-    const approvalViaPublicUrl = props.approvalViaPublicUrl ?? false;
-    let approvalBaseUrl = '';
-    if (approvalViaPublicUrl) {
-      const approvalFunctionUrl = approvalHandlerFunction.addFunctionUrl({
-        authType: lambda.FunctionUrlAuthType.NONE,
-      });
-      approvalBaseUrl = approvalFunctionUrl.url;
-      new cdk.CfnOutput(this, 'CollectionApprovalUrl', {
-        description: 'Function URL that approvers use to approve/deny collection requests',
-        value: approvalFunctionUrl.url,
-      });
-    }
+    }));
 
-    // Main Lambda needs to create/read/consume approvals and notify approvers.
-    approvalTable.grantReadWriteData(lambdaExecutionRole);
+    // The MCP Lambda publishes a rich notification (with the console deep link)
+    // in addition to the bare one the aws:approve step sends.
     approvalTopic.grantPublish(lambdaExecutionRole);
 
-    new cdk.CfnOutput(this, 'CollectionApprovalFunctionName', {
-      description: 'Approval handler Lambda. Approvers invoke it directly (IAM-authenticated) using the command from the SNS notification',
-      value: approvalHandlerFunction.functionName,
+    // Wrapper: approve → collect (single instance).
+    const collectApprovalDocName = `${cdk.Stack.of(this).stackName}-collect-with-approval`;
+    new ssm.CfnDocument(this, 'CollectApprovalDocument', {
+      name: collectApprovalDocName,
+      documentType: 'Automation',
+      updateMethod: 'NewVersion',
+      content: {
+        schemaVersion: '0.3',
+        description:
+          'Human-in-the-loop EKS log collection: pauses at a native aws:approve step '
+          + 'until a designated approver approves in the Systems Manager console, then '
+          + 'runs AWSSupport-CollectEKSInstanceLogs on the target node.',
+        assumeRole: '{{ AutomationAssumeRole }}',
+        parameters: {
+          EKSInstanceId: {
+            type: 'String',
+            description: 'EC2 instance ID of the EKS worker node',
+            allowedPattern: '^i-[0-9a-f]{8,17}$',
+          },
+          LogDestination: {
+            type: 'String',
+            description: 'S3 bucket that receives the log bundle',
+          },
+          AutomationAssumeRole: {
+            type: 'String',
+            description: 'Role the automation (and child automation) runs as',
+          },
+          Approvers: {
+            type: 'StringList',
+            description: 'IAM principals allowed to approve this collection',
+          },
+          SNSTopicArn: {
+            type: 'String',
+            description: 'Topic notified when approval is requested',
+          },
+        },
+        mainSteps: [
+          {
+            name: 'waitForHumanApproval',
+            action: 'aws:approve',
+            timeoutSeconds: approvalTtlSeconds,
+            onFailure: 'Abort',
+            inputs: {
+              NotificationArn: '{{ SNSTopicArn }}',
+              Message:
+                'An MCP agent requested EKS log collection on instance '
+                + '{{ EKSInstanceId }}. Approving runs AWSSupport-CollectEKSInstanceLogs '
+                + 'on that node and uploads the bundle to {{ LogDestination }}. '
+                + 'Approve or deny this execution in the Systems Manager console '
+                + '(Automation → Executions) or via ssm send-automation-signal.',
+              MinRequiredApprovals: 1,
+              Approvers: '{{ Approvers }}',
+            },
+          },
+          {
+            name: 'collectLogs',
+            action: 'aws:executeAutomation',
+            inputs: {
+              DocumentName: 'AWSSupport-CollectEKSInstanceLogs',
+              RuntimeParameters: {
+                EKSInstanceId: '{{ EKSInstanceId }}',
+                LogDestination: '{{ LogDestination }}',
+                AutomationAssumeRole: '{{ AutomationAssumeRole }}',
+              },
+            },
+          },
+        ],
+      },
     });
+
+    // Wrapper: approve once → fan out one collection per sampled node. A single
+    // human approval authorizes the whole batch; the fan-out step emits
+    // "instanceId|executionId" pairs the Lambda's batch_status tool resolves.
+    const batchApprovalDocName = `${cdk.Stack.of(this).stackName}-batch-collect-with-approval`;
+    new ssm.CfnDocument(this, 'BatchCollectApprovalDocument', {
+      name: batchApprovalDocName,
+      documentType: 'Automation',
+      updateMethod: 'NewVersion',
+      content: {
+        schemaVersion: '0.3',
+        description:
+          'Human-in-the-loop batch EKS log collection: one aws:approve step authorizes '
+          + 'the whole batch, then a fan-out step starts one '
+          + 'AWSSupport-CollectEKSInstanceLogs execution per node.',
+        assumeRole: '{{ AutomationAssumeRole }}',
+        parameters: {
+          InstanceIds: {
+            type: 'StringList',
+            description: 'EC2 instance IDs of the sampled EKS worker nodes (max 15)',
+          },
+          LogDestination: {
+            type: 'String',
+            description: 'S3 bucket that receives the log bundles',
+          },
+          AutomationAssumeRole: {
+            type: 'String',
+            description: 'Role the automation (and child automations) runs as',
+          },
+          Approvers: {
+            type: 'StringList',
+            description: 'IAM principals allowed to approve this batch',
+          },
+          SNSTopicArn: {
+            type: 'String',
+            description: 'Topic notified when approval is requested',
+          },
+        },
+        mainSteps: [
+          {
+            name: 'waitForHumanApproval',
+            action: 'aws:approve',
+            timeoutSeconds: approvalTtlSeconds,
+            onFailure: 'Abort',
+            inputs: {
+              NotificationArn: '{{ SNSTopicArn }}',
+              // NOTE: SSM cannot substitute StringList parameters (InstanceIds)
+              // inside a message string — the execution's Parameters section in
+              // the console shows the exact node list instead.
+              Message:
+                'An MCP agent requested BATCH EKS log collection. Approving runs '
+                + 'AWSSupport-CollectEKSInstanceLogs on every node in this execution\'s '
+                + 'InstanceIds parameter (visible on the execution page) and uploads '
+                + 'bundles to {{ LogDestination }}. Approve or deny this execution in '
+                + 'the Systems Manager console (Automation → Executions) or via '
+                + 'ssm send-automation-signal.',
+              MinRequiredApprovals: 1,
+              Approvers: '{{ Approvers }}',
+            },
+          },
+          {
+            name: 'fanOutCollections',
+            action: 'aws:executeScript',
+            timeoutSeconds: 600,
+            inputs: {
+              Runtime: 'python3.11',
+              Handler: 'handler',
+              InputPayload: {
+                InstanceIds: '{{ InstanceIds }}',
+                LogDestination: '{{ LogDestination }}',
+                AutomationAssumeRole: '{{ AutomationAssumeRole }}',
+              },
+              Script: [
+                'import boto3',
+                '',
+                '',
+                'def handler(events, context):',
+                '    ssm = boto3.client("ssm")',
+                '    executions, errors = [], []',
+                '    for iid in events["InstanceIds"][:15]:',
+                '        try:',
+                '            resp = ssm.start_automation_execution(',
+                '                DocumentName="AWSSupport-CollectEKSInstanceLogs",',
+                '                Parameters={',
+                '                    "EKSInstanceId": [iid],',
+                '                    "LogDestination": [events["LogDestination"]],',
+                '                    "AutomationAssumeRole": [events["AutomationAssumeRole"]],',
+                '                },',
+                '            )',
+                '            executions.append(f"{iid}|{resp[\'AutomationExecutionId\']}")',
+                '        except Exception as e:',
+                '            errors.append(f"{iid}|{e}")',
+                '    return {"executions": executions, "errors": errors}',
+              ].join('\n'),
+            },
+            outputs: [
+              { Name: 'Executions', Selector: '$.Payload.executions', Type: 'StringList' },
+              { Name: 'Errors', Selector: '$.Payload.errors', Type: 'StringList' },
+            ],
+          },
+        ],
+      },
+    });
+
     new cdk.CfnOutput(this, 'CollectionApprovalTopicArn', {
       description: 'SNS topic that notifies approvers of collection requests',
       value: approvalTopic.topicArn,
+    });
+    new cdk.CfnOutput(this, 'CollectionApprovalDocuments', {
+      description: 'Approval wrapper SSM documents (approve in Systems Manager console → Automation → Executions)',
+      value: `${collectApprovalDocName}, ${batchApprovalDocName}`,
     });
 
     this.ssmAutomationFunction = new lambda.Function(this, 'SSMAutomationFunction', {
@@ -994,11 +1156,14 @@ export class SsmAutomationGatewayV2Construct extends Construct {
         ALLOWED_CLUSTER_NAMES: (props.allowedClusterNames ?? []).join(','),
         ALLOW_SELF_MANAGED_NODES: String(props.allowSelfManagedNodes ?? false),
         REQUIRE_COLLECTION_APPROVAL: String(requireCollectionApproval),
-        APPROVAL_TABLE_NAME: approvalTable.tableName,
         APPROVAL_TOPIC_ARN: approvalTopic.topicArn,
-        APPROVAL_BASE_URL: approvalBaseUrl,
-        APPROVAL_FUNCTION_NAME: approvalHandlerFunction.functionName,
-        APPROVAL_TTL_SECONDS: String(approvalTtlSeconds),
+        COLLECT_APPROVAL_DOCUMENT: collectApprovalDocName,
+        BATCH_APPROVAL_DOCUMENT: batchApprovalDocName,
+        APPROVAL_APPROVERS: approverArns.join(','),
+        // Lets the Lambda tell the agent honestly whether anyone actually
+        // receives the SNS notification (email subscriptions created at deploy
+        // time). Out-of-band subscriptions added later aren't reflected here.
+        APPROVAL_EMAILS_CONFIGURED: String((props.approvalNotificationEmails ?? []).length > 0),
         STACK_NAME: cdk.Stack.of(this).stackName,
       },
       code: lambda.Code.fromAsset(path.join(__dirname, 'lambda')),
@@ -1314,9 +1479,10 @@ export class SsmAutomationGatewayV2Construct extends Construct {
   /**
    * Returns the enhanced tool schema definitions for the MCP Gateway.
    * collect/batch_collect are mutating (they start SSM Automation on nodes) and
-   * are gated at runtime by a human approval when requireCollectionApproval is
-   * on (M1/M2): the first call returns status="pending_approval" + an approvalId,
-   * and the caller re-invokes with that approvalId once a human approves.
+   * are gated at runtime by a native SSM aws:approve step when
+   * requireCollectionApproval is on (M1/M2): the call returns
+   * status="pending_approval" with an SSM console link, a human approves there,
+   * and the collection proceeds automatically — the agent just polls status.
    */
   private getToolSchemaDefinitions(): object[] {
     const tools: object[] = [
@@ -1325,7 +1491,7 @@ export class SsmAutomationGatewayV2Construct extends Construct {
       // =====================================================================
       {
         Name: 'collect',
-        Description: 'Start EKS log collection from a worker node. NOTE: collection is a mutating action and may require human approval — if the response has status="pending_approval", a human must approve the request out-of-band, then you re-call collect with the SAME instanceId plus the returned approvalId. Returns executionId for async polling once approved. Recommended workflow: collect → status (poll until complete) → quick_triage (ONE call for full analysis). Do NOT read individual files unless quick_triage/summarize/network_diagnostics are insufficient. Supports cross-region. CITATION: cite the executionId and region returned.',
+        Description: 'Start EKS log collection from a worker node. NOTE: collection is a mutating action and may require human approval — if the response has status="pending_approval", the SSM Automation execution is PAUSED at a native aws:approve step. Show the user the approvalConsoleUrl, then poll status(executionId) every 30 seconds up to 10 attempts WITHOUT waiting for the user to confirm — collection continues automatically after approval; do NOT re-call collect. If still pending after 10 polls, stop and ask the user to get it approved. Recommended workflow: collect → status (poll until complete) → quick_triage (ONE call for full analysis). Do NOT read individual files unless quick_triage/summarize/network_diagnostics are insufficient. Supports cross-region. CITATION: cite the executionId and region returned.',
         InputSchema: {
           Type: 'object',
           Properties: {
@@ -1340,10 +1506,6 @@ export class SsmAutomationGatewayV2Construct extends Construct {
             region: {
               Type: 'string',
               Description: 'AWS region where the instance runs (e.g., us-west-2). Optional: auto-detected from instance if omitted.',
-            },
-            approvalId: {
-              Type: 'string',
-              Description: 'Approval ID returned by a prior collect call when status was "pending_approval". Pass it (with the same instanceId) after a human approves, to run the collection. Do not fabricate this value.',
             },
           },
           Required: ['instanceId'],
@@ -1905,7 +2067,7 @@ export class SsmAutomationGatewayV2Construct extends Construct {
       },
       {
         Name: 'batch_collect',
-        Description: 'Smart batch log collection with statistical sampling. Triages all nodes in a cluster, groups unhealthy nodes into buckets by failure signature, and collects from representative samples. Handles 1000+ node clusters efficiently. Defaults to a DRY RUN (preview only); pass dryRun=false to actually collect. Real collection is mutating and may require human approval — if the response has status="pending_approval", a human approves out-of-band and you re-call with dryRun=false plus the returned approvalId. CITATION: Cite batchId, node count, and sampling strategy used.',
+        Description: 'Smart batch log collection with statistical sampling. Triages all nodes in a cluster, groups unhealthy nodes into buckets by failure signature, and collects from representative samples. Handles 1000+ node clusters efficiently. Defaults to a DRY RUN (preview only); pass dryRun=false to actually collect. Real collection is mutating and may require human approval — if the response has status="pending_approval", the batch is PAUSED at a native SSM aws:approve step. Show the user the approvalConsoleUrl, then poll batch_status(batchId) every 30 seconds up to 10 attempts WITHOUT waiting for the user to confirm — the fan-out happens automatically after approval; do NOT re-call batch_collect. If still pending after 10 polls, stop and ask the user to get it approved. CITATION: Cite batchId, node count, and sampling strategy used.',
         InputSchema: {
           Type: 'object',
           Properties: {
@@ -1940,10 +2102,6 @@ export class SsmAutomationGatewayV2Construct extends Construct {
             dryRun: {
               Type: 'boolean',
               Description: 'Preview which nodes would be collected without starting (default: true). Set false to actually collect.',
-            },
-            approvalId: {
-              Type: 'string',
-              Description: 'Approval ID returned by a prior batch_collect(dryRun=false) call when status was "pending_approval". Pass it (with dryRun=false and the same clusterName) after a human approves. Do not fabricate this value.',
             },
           },
           Required: ['clusterName'],
@@ -2118,97 +2276,6 @@ export class SsmAutomationGatewayV2Construct extends Construct {
    * updates the DynamoDB record; the main Lambda performs the actual
    * collection after the caller re-invokes.
    */
-  private getApprovalHandlerCode(): string {
-    return `
-import json
-import os
-import time
-import hashlib
-import hmac
-import boto3
-
-TABLE = os.environ['APPROVAL_TABLE_NAME']
-ddb = boto3.client('dynamodb')
-
-
-def _respond(is_http, status_code, title, body):
-    if is_http:
-        return {
-            'statusCode': status_code,
-            'headers': {'Content-Type': 'text/html; charset=utf-8'},
-            'body': f'<html><body style="font-family:sans-serif;max-width:640px;margin:40px auto">'
-                    f'<h2>{title}</h2><p>{body}</p></body></html>',
-        }
-    return {'statusCode': status_code, 'result': title, 'message': body}
-
-
-def handler(event, context):
-    # Function URL events carry requestContext/queryStringParameters; a direct
-    # IAM-authenticated invoke passes the payload as the event itself.
-    is_http = isinstance(event, dict) and 'requestContext' in event
-    if is_http:
-        params = event.get('queryStringParameters') or {}
-    else:
-        params = event if isinstance(event, dict) else {}
-
-    approval_id = str(params.get('approvalId', '') or '')
-    token = str(params.get('token', '') or '')
-    decision = str(params.get('decision', '') or '').lower()
-
-    if not approval_id or not token or decision not in ('approve', 'deny'):
-        return _respond(is_http, 400, 'Invalid request', 'Missing approvalId, token, or a valid decision (approve/deny).')
-
-    try:
-        resp = ddb.get_item(TableName=TABLE, Key={'approvalId': {'S': approval_id}})
-    except Exception as e:
-        return _respond(is_http, 500, 'Error', f'Could not look up the request: {e}')
-
-    item = resp.get('Item')
-    if not item:
-        return _respond(is_http, 404, 'Not found', 'This approval request does not exist or has expired.')
-
-    # Constant-time comparison of the token hash.
-    token_hash = hashlib.sha256(token.encode('utf-8')).hexdigest()
-    stored_hash = item.get('tokenHash', {}).get('S', '')
-    if not stored_hash or not hmac.compare_digest(token_hash, stored_hash):
-        return _respond(is_http, 403, 'Forbidden', 'Invalid approval token.')
-
-    ttl = int(item.get('ttl', {}).get('N', '0') or 0)
-    if ttl and int(time.time()) > ttl:
-        return _respond(is_http, 403, 'Expired', 'This approval request has expired. Ask the agent to request collection again.')
-
-    status = item.get('status', {}).get('S', '')
-    if status != 'PENDING':
-        return _respond(is_http, 409, 'Already decided', f'This request is already {status}. No further action taken.')
-
-    new_status = 'APPROVED' if decision == 'approve' else 'DENIED'
-    try:
-        ddb.update_item(
-            TableName=TABLE,
-            Key={'approvalId': {'S': approval_id}},
-            UpdateExpression='SET #s = :new, decidedAt = :t',
-            ConditionExpression='#s = :pending',
-            ExpressionAttributeNames={'#s': 'status'},
-            ExpressionAttributeValues={
-                ':new': {'S': new_status},
-                ':pending': {'S': 'PENDING'},
-                ':t': {'N': str(int(time.time()))},
-            },
-        )
-    except ddb.exceptions.ConditionalCheckFailedException:
-        return _respond(is_http, 409, 'Already decided', 'This request was just decided by someone else.')
-    except Exception as e:
-        return _respond(is_http, 500, 'Error', f'Could not record the decision: {e}')
-
-    tool = item.get('tool', {}).get('S', 'collect')
-    target = item.get('target', {}).get('S', '')
-    if new_status == 'APPROVED':
-        return _respond(is_http, 200, 'Approved',
-                        f'{tool} on {target} is approved. The agent can now proceed with the collection.')
-    return _respond(is_http, 200, 'Denied', f'{tool} on {target} was denied. No collection will run.')
-`;
-  }
-
   private getUnzipLambdaCode(): string {
     return `
 import json

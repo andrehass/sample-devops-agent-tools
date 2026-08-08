@@ -79,26 +79,30 @@ new EksNodeLogMcpStack(app, 'EksNodeLogMcpStack', {
     : undefined,
 
   // Human-in-the-loop approval for the mutating collection tools (collect,
-  // batch_collect). On by default (security review M1/M2): the agent's call
-  // creates a pending approval and notifies approvers via SNS; the SSM run only
-  // happens after a human approves via the approval link. Set
-  // REQUIRE_COLLECTION_APPROVAL=false only for a fully supervised/test deployment.
+  // batch_collect). On by default (security review M1/M2): collection runs via
+  // a wrapper SSM Automation document whose first step is the native
+  // aws:approve action — the execution pauses in SSM until a designated human
+  // approves it in the Systems Manager console, then collection proceeds
+  // automatically. Set REQUIRE_COLLECTION_APPROVAL=false only for a fully
+  // supervised/test deployment.
   requireCollectionApproval: process.env.REQUIRE_COLLECTION_APPROVAL
     ? !['0', 'false', 'no'].includes(process.env.REQUIRE_COLLECTION_APPROVAL.toLowerCase())
     : undefined,
 
-  // Opt-in public Function URL for one-click approve/deny links. Default off:
-  // account guardrails (e.g. mitigation services that strip public Lambda
-  // policies) silently break public URLs. When off, the approval email
-  // contains an IAM-authenticated `aws lambda invoke` command instead.
-  approvalViaPublicUrl: process.env.APPROVAL_VIA_PUBLIC_URL === 'true',
+  // IAM principals allowed to approve collections (user/role ARNs, comma
+  // separated). REQUIRED when approval is enabled — synth fails without it.
+  // Approvers also need ssm:SendAutomationSignal to click Approve/Deny.
+  approvalApproverArns: process.env.APPROVAL_APPROVER_ARNS
+    ? process.env.APPROVAL_APPROVER_ARNS.split(',').filter(Boolean)
+    : undefined,
 
-  // Emails to subscribe to the approval SNS topic (each gets the approve/deny action).
+  // Emails to subscribe to the approval SNS topic (each gets the SSM console
+  // approval link when a collection is requested).
   approvalNotificationEmails: process.env.APPROVAL_NOTIFICATION_EMAILS
     ? process.env.APPROVAL_NOTIFICATION_EMAILS.split(',').filter(Boolean)
     : undefined,
 
-  // How long a pending approval stays valid (seconds).
+  // How long the aws:approve step waits for a human decision (seconds).
   approvalTtlSeconds: process.env.APPROVAL_TTL_SECONDS
     ? parseInt(process.env.APPROVAL_TTL_SECONDS, 10)
     : undefined,

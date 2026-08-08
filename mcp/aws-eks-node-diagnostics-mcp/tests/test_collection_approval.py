@@ -1,7 +1,8 @@
 """
-Unit tests for the human-in-the-loop collection approval gate (M1/M2) and the
-E4/E5 hardening helpers. These cover the pure-logic paths that do not require
-AWS calls (bypass, disabled, fail-closed, log-key scoping, regex safety).
+Unit tests for the SSM-native human-in-the-loop collection approval (M1/M2) and
+the E4/E5 hardening helpers. These cover the pure-logic paths that do not
+require AWS calls (fail-closed preconditions, wrapper status augmentation,
+log-key scoping, regex safety).
 """
 import os
 import sys
@@ -24,27 +25,104 @@ INSTANCE = 'i-0123456789abcdef0'
 OTHER_INSTANCE = 'i-0fedcba9876543210'
 
 
-class TestApprovalGate:
-    def test_bypass_flag_skips_approval(self):
-        """Server-side _approval_bypass short-circuits the gate (used by batch)."""
-        result = mod.enforce_collection_approval(
-            'collect', INSTANCE, 'us-east-1', {'_approval_bypass': True}
-        )
-        assert result is None
-
-    def test_disabled_returns_none(self, monkeypatch):
-        """When approval is disabled, the gate lets the call proceed."""
-        monkeypatch.setattr(mod, 'REQUIRE_COLLECTION_APPROVAL', False)
-        result = mod.enforce_collection_approval('collect', INSTANCE, 'us-east-1', {})
-        assert result is None
-
-    def test_required_but_unconfigured_fails_closed(self, monkeypatch):
-        """Approval required but no table configured -> 503, never runs unapproved."""
-        monkeypatch.setattr(mod, 'REQUIRE_COLLECTION_APPROVAL', True)
-        monkeypatch.setattr(mod, 'APPROVAL_TABLE_NAME', '')
-        result = mod.enforce_collection_approval('collect', INSTANCE, 'us-east-1', {})
+class TestApprovalPreconditions:
+    def test_unconfigured_fails_closed(self, monkeypatch):
+        """Approval required but wrapper doc/approvers unset -> 503, never runs unapproved."""
+        monkeypatch.setattr(mod, 'COLLECT_APPROVAL_DOCUMENT', '')
+        monkeypatch.setattr(mod, 'APPROVAL_APPROVERS', [])
+        result = mod.enforce_approval_preconditions('us-east-1')
         assert result is not None
         assert result['statusCode'] == 503
+
+    def test_no_approvers_fails_closed(self, monkeypatch):
+        """A wrapper document without designated approvers is not usable."""
+        monkeypatch.setattr(mod, 'COLLECT_APPROVAL_DOCUMENT', 'stack-collect-with-approval')
+        monkeypatch.setattr(mod, 'APPROVAL_APPROVERS', [])
+        result = mod.enforce_approval_preconditions('us-east-1')
+        assert result is not None
+        assert result['statusCode'] == 503
+
+    def test_cross_region_rejected(self, monkeypatch):
+        """The wrapper doc is regional — approval-gated collection is stack-region only."""
+        monkeypatch.setattr(mod, 'COLLECT_APPROVAL_DOCUMENT', 'stack-collect-with-approval')
+        monkeypatch.setattr(mod, 'APPROVAL_APPROVERS', ['arn:aws:iam::123456789012:role/Approver'])
+        result = mod.enforce_approval_preconditions('us-west-2')
+        assert result is not None
+        assert result['statusCode'] == 400
+
+    def test_configured_stack_region_proceeds(self, monkeypatch):
+        monkeypatch.setattr(mod, 'COLLECT_APPROVAL_DOCUMENT', 'stack-collect-with-approval')
+        monkeypatch.setattr(mod, 'APPROVAL_APPROVERS', ['arn:aws:iam::123456789012:role/Approver'])
+        assert mod.enforce_approval_preconditions('us-east-1') is None
+
+
+class TestConsoleUrl:
+    def test_deep_link_shape(self):
+        url = mod.console_automation_url('us-east-1', 'exec-123')
+        assert url == (
+            'https://us-east-1.console.aws.amazon.com/systems-manager/'
+            'automation/execution/exec-123?region=us-east-1'
+        )
+
+
+def _wrapper_execution(approve_status, extra_steps=None):
+    steps = [{'StepName': 'waitForHumanApproval', 'StepStatus': approve_status}]
+    steps.extend(extra_steps or [])
+    return {
+        'AutomationExecutionId': 'wrapper-1',
+        'AutomationExecutionStatus': 'InProgress',
+        'StepExecutions': steps,
+    }
+
+
+class TestWrapperStatusAugmentation:
+    def test_waiting_reports_pending_with_console_url(self):
+        result = {'executionId': 'wrapper-1', 'task': {'message': ''}}
+        mod.augment_wrapper_status(_wrapper_execution('Waiting'), result, 'us-east-1')
+        assert result['humanApproval']['state'] == 'pending'
+        assert 'console.aws.amazon.com' in result['humanApproval']['consoleUrl']
+        assert result['task']['message'].startswith('Waiting for human approval')
+
+    def test_denied_or_timed_out_reports_denied(self):
+        result = {'executionId': 'wrapper-1', 'task': {'state': 'running', 'message': ''}}
+        mod.augment_wrapper_status(_wrapper_execution('TimedOut'), result, 'us-east-1')
+        assert result['humanApproval']['state'] == 'denied_or_expired'
+        assert result['task']['state'] == 'failed'
+
+    def test_approved_exposes_child_execution(self):
+        collect_step = {
+            'StepName': 'collectLogs',
+            'StepStatus': 'InProgress',
+            'Outputs': {'ExecutionId': ['child-42']},
+        }
+        result = {'executionId': 'wrapper-1'}
+        mod.augment_wrapper_status(
+            _wrapper_execution('Success', [collect_step]), result, 'us-east-1'
+        )
+        assert result['humanApproval']['state'] == 'approved'
+        assert result['childExecutionId'] == 'child-42'
+
+    def test_approved_batch_exposes_children(self):
+        fanout_step = {
+            'StepName': 'fanOutCollections',
+            'StepStatus': 'Success',
+            'Outputs': {'Executions': [f'{INSTANCE}|child-1', f'{OTHER_INSTANCE}|child-2']},
+        }
+        result = {'executionId': 'wrapper-1'}
+        mod.augment_wrapper_status(
+            _wrapper_execution('Success', [fanout_step]), result, 'us-east-1'
+        )
+        assert result['childExecutions'] == [
+            {'instanceId': INSTANCE, 'executionId': 'child-1'},
+            {'instanceId': OTHER_INSTANCE, 'executionId': 'child-2'},
+        ]
+
+    def test_non_wrapper_document_not_flagged(self, monkeypatch):
+        monkeypatch.setattr(mod, 'COLLECT_APPROVAL_DOCUMENT', 'stack-collect-with-approval')
+        monkeypatch.setattr(mod, 'BATCH_APPROVAL_DOCUMENT', 'stack-batch-collect-with-approval')
+        assert mod._is_approval_wrapper('AWSSupport-CollectEKSInstanceLogs') is False
+        assert mod._is_approval_wrapper('stack-collect-with-approval') is True
+        assert mod._is_approval_wrapper('') is False
 
 
 class TestLogKeyScoping:
