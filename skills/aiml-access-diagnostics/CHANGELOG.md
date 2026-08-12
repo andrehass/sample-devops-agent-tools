@@ -42,6 +42,13 @@ item below is a case the 1.0.0 logic would have diagnosed incorrectly.
 - Frontmatter `description` condensed to fit the DevOps Agent upload limit of 1024
   characters, which rejects the skill outright when exceeded. All trigger and exclusion
   phrases were preserved.
+- Corrected the zip command in `README.md` to archive the skill's contents rather than its
+  parent directory, so `SKILL.md` lands at the root of the archive as the AWS DevOps Agent
+  documentation requires. Wrapping the files in an `aiml-access-diagnostics/` prefix still
+  uploads and still activates the skill, because the platform finds `SKILL.md` by scanning
+  — but reference files are fetched by manifest path and every one fails with `Failed to
+  get skill resource`, silently reducing the skill to `SKILL.md` alone. Added the expected
+  archive layout, a verification step, and `-D` to omit extensionless directory entries.
 - Reference links in `SKILL.md` changed from absolute GitHub URLs to relative paths. The
   absolute form made the agent attempt a remote fetch at runtime instead of reading the
   bundled files, so no reference ever loaded. Relative `.md` links do break

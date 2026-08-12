@@ -132,12 +132,45 @@ If you have a [GitHub connection configured](https://docs.aws.amazon.com/devopsa
 
 **Option B: Upload as a zip file**
 
-1. Zip the `aiml-access-diagnostics/` directory (only including allowed extensions):
+1. Zip the skill's **contents**, so that `SKILL.md` sits at the root of the archive:
 
    ```bash
-   cd skills
-   zip -r aiml-access-diagnostics.zip aiml-access-diagnostics/ -i '*.md' '*.txt' '*.json' '*.yaml' '*.yml' '*.xml' '*.csv' '*.tsv' '*.html' '*.htm' '*.png' '*.jpg' '*.jpeg' '*.gif' '*.svg' '*.webp' '*.pdf' -x '*/.claude/*' '*/scripts/*' '*/README.md' '*/.skilleval.yaml' '*/.skilleval.yml' '*/CHANGELOG.md' '*/evals/*'
+   cd skills/aiml-access-diagnostics
+   zip -rD ../../aiml-access-diagnostics.zip . \
+     -i '*.md' '*.txt' '*.json' '*.yaml' '*.yml' '*.xml' '*.csv' '*.tsv' '*.html' '*.htm' '*.png' '*.jpg' '*.jpeg' '*.gif' '*.svg' '*.webp' '*.pdf' \
+     -x './README.md' './CHANGELOG.md' './.skilleval.yaml' './.skilleval.yml' './evals/*' './.claude/*' './scripts/*'
    ```
+
+   The resulting archive must look like this, with `SKILL.md` at the top level:
+
+   ```text
+   aiml-access-diagnostics.zip
+   ├── SKILL.md
+   └── references/
+       ├── access-chain-model.md
+       ├── data-collection.md
+       ├── finding-logic.md
+       ├── report-format.md
+       ├── svc-bedrock.md
+       └── svc-sagemaker.md
+   ```
+
+   Verify before uploading:
+
+   ```bash
+   unzip -l ../../aiml-access-diagnostics.zip
+   ```
+
+   > **Do not zip the parent directory.** Running `zip -r skill.zip aiml-access-diagnostics/`
+   > from `skills/` wraps every file in an `aiml-access-diagnostics/` prefix. The upload
+   > still succeeds and the skill still activates, because the platform locates `SKILL.md`
+   > by scanning the archive — but reference files are retrieved by their manifest path
+   > (`references/access-chain-model.md`), which no longer matches the stored path. Every
+   > reference then fails with `Failed to get skill resource`, and the skill runs on
+   > `SKILL.md` alone with no error surfaced at upload time. The `-D` flag omits directory
+   > entries, which carry no file extension and can trip the extension validator. See
+   > [Uploading a skill](https://docs.aws.amazon.com/devopsagent/latest/userguide/about-aws-devops-agent-devops-agent-skills.html#creating-skills)
+   > for the required structure.
 
 2. In the AWS DevOps Agent web app, navigate to the **Skills** page.
 3. Click **Add skill** → **Upload skill**.
