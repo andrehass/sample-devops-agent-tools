@@ -84,17 +84,17 @@ service-specific knowledge; without it the output would be a guess.
 - **This skill (orchestrator):** request classification, chain traversal order,
   verdict assignment, report rendering.
 - **Chain model:** the six-hop authorization chain and its precedence rules —
-  [`references/access-chain-model.md`](https://github.com/aws-samples/sample-devops-agent-tools/blob/main/skills/aiml-access-diagnostics/references/access-chain-model.md)
+  [`references/access-chain-model.md`](references/access-chain-model.md)
 - **Data collection:** the read-only API allowlist, error classification, and the
   structured object collection produces —
-  [`references/data-collection.md`](https://github.com/aws-samples/sample-devops-agent-tools/blob/main/skills/aiml-access-diagnostics/references/data-collection.md)
+  [`references/data-collection.md`](references/data-collection.md)
 - **Finding logic:** verdict rules and body templates per failure class —
-  [`references/finding-logic.md`](https://github.com/aws-samples/sample-devops-agent-tools/blob/main/skills/aiml-access-diagnostics/references/finding-logic.md)
+  [`references/finding-logic.md`](references/finding-logic.md)
 - **Report format:** report structure and pre-render validation —
-  [`references/report-format.md`](https://github.com/aws-samples/sample-devops-agent-tools/blob/main/skills/aiml-access-diagnostics/references/report-format.md)
+  [`references/report-format.md`](references/report-format.md)
 - **Service specifics:** loaded only for the service in question —
-  [`references/svc-bedrock.md`](https://github.com/aws-samples/sample-devops-agent-tools/blob/main/skills/aiml-access-diagnostics/references/svc-bedrock.md),
-  [`references/svc-sagemaker.md`](https://github.com/aws-samples/sample-devops-agent-tools/blob/main/skills/aiml-access-diagnostics/references/svc-sagemaker.md)
+  [`references/svc-bedrock.md`](references/svc-bedrock.md),
+  [`references/svc-sagemaker.md`](references/svc-sagemaker.md)
 
 ## Step 1: Classify the request
 
@@ -261,9 +261,9 @@ mark the affected hop, and continue with what remains.
 
 ## References
 
-- [`references/access-chain-model.md`](https://github.com/aws-samples/sample-devops-agent-tools/blob/main/skills/aiml-access-diagnostics/references/access-chain-model.md) — the six-hop chain, precedence, and traversal rules
-- [`references/data-collection.md`](https://github.com/aws-samples/sample-devops-agent-tools/blob/main/skills/aiml-access-diagnostics/references/data-collection.md) — API allowlist, error classification, output schema
-- [`references/finding-logic.md`](https://github.com/aws-samples/sample-devops-agent-tools/blob/main/skills/aiml-access-diagnostics/references/finding-logic.md) — verdict rules and body templates
-- [`references/report-format.md`](https://github.com/aws-samples/sample-devops-agent-tools/blob/main/skills/aiml-access-diagnostics/references/report-format.md) — report structure and pre-render validation
-- [`references/svc-bedrock.md`](https://github.com/aws-samples/sample-devops-agent-tools/blob/main/skills/aiml-access-diagnostics/references/svc-bedrock.md) — Bedrock roles, actions, and non-IAM denial causes
-- [`references/svc-sagemaker.md`](https://github.com/aws-samples/sample-devops-agent-tools/blob/main/skills/aiml-access-diagnostics/references/svc-sagemaker.md) — SageMaker PassRole, trust policy, and execution-role minimums
+- [`references/access-chain-model.md`](references/access-chain-model.md) — the six-hop chain, precedence, and traversal rules
+- [`references/data-collection.md`](references/data-collection.md) — API allowlist, error classification, output schema
+- [`references/finding-logic.md`](references/finding-logic.md) — verdict rules and body templates
+- [`references/report-format.md`](references/report-format.md) — report structure and pre-render validation
+- [`references/svc-bedrock.md`](references/svc-bedrock.md) — Bedrock roles, actions, and non-IAM denial causes
+- [`references/svc-sagemaker.md`](references/svc-sagemaker.md) — SageMaker PassRole, trust policy, and execution-role minimums

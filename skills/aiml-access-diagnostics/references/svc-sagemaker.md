@@ -92,8 +92,7 @@ recommended one, most correctly configured callers carry that condition — and
 `SimulatePrincipalPolicy` returns `implicitDeny` for them unless
 `iam:PassedToService=sagemaker.amazonaws.com` is passed as a context entry. Verified
 against a live role: denied without the key, allowed with it. Never report a hop-2 denial
-from a simulation that omitted it. See the simulation phase in
-https://github.com/aws-samples/sample-devops-agent-tools/blob/main/skills/aiml-access-diagnostics/references/data-collection.md
+from a simulation that omitted it. See the simulation phase in `data-collection.md`.
 
 ## Hop 3 — Trust policy specifics
 
