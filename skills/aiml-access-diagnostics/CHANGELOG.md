@@ -42,6 +42,12 @@ item below is a case the 1.0.0 logic would have diagnosed incorrectly.
 - Frontmatter `description` condensed to fit the DevOps Agent upload limit of 1024
   characters, which rejects the skill outright when exceeded. All trigger and exclusion
   phrases were preserved.
+- Reference links in `SKILL.md` changed from absolute GitHub URLs to relative paths. The
+  absolute form made the agent attempt a remote fetch at runtime instead of reading the
+  bundled files, so no reference ever loaded. Relative `.md` links do break
+  `mkdocs build --strict`, but only in `README.md`, which the docs catalog copies into the
+  site; `SKILL.md` and `references/` are never part of the docs build. The two consumers
+  require opposite link styles.
 
 ## [1.0.0] - 2026-08-11
 
