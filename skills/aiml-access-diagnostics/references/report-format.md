@@ -9,6 +9,7 @@ traceable to the evidence that produced it.
 ## Required sections, in order
 
 ```
+> AI-generated diagnosis banner              <- MANDATORY, first element
 # AI/ML Access Diagnosis — <service> <action>
 
 ## Summary
@@ -20,6 +21,33 @@ traceable to the evidence that produced it.
 ## What This Diagnosis Cannot Tell You
 ## References
 ```
+
+### Sections are never silently dropped
+
+Every section above that is not explicitly marked conditional **must be rendered**, even
+when there is no data for it. An absent section is indistinguishable from a check that was
+never run, which is the ambiguity this skill exists to remove.
+
+When a section has no content, render its heading followed by a muted one-line
+explanation of why — for example, "No resource policy applies to this call." Never omit
+the heading, and never collapse two sections into one.
+
+The two conditional sections are gated on a specific trigger and are omitted when it did
+not fire. That is the only permitted omission.
+
+## Mandatory AI-generated banner
+
+The report's **first element**, before the title, verbatim:
+
+> ⚠️ **AI-generated diagnosis — verify before acting.** This analysis was produced by an
+> AI agent from read-only AWS API data. Verify findings independently before changing any
+> IAM configuration. Proposed policies are suggestions derived from observed evidence,
+> have not been validated against your workload, and must be reviewed and scoped before
+> use. Data reflects a point in time and may have changed.
+
+This is required because the report proposes IAM policy changes. A reader who applies a
+generated policy without review is the highest-consequence failure mode of this skill,
+and the banner is the last line of defence against it.
 
 ## Summary
 
@@ -166,42 +194,49 @@ include links unrelated to this diagnosis.
 
 ## Pre-render validation
 
-Run all 12 checks before delivering. Do not output the validation results.
+Run all 14 checks before delivering. Do not output the validation results.
 
-### Structure (4)
+### Structure (5)
 
-1. **Required sections present**, in order, none missing, none extra.
-2. **Conditional sections gated correctly.** The incomplete-diagnosis notice appears if
+1. **AI-generated banner present** as the first element, before the title, with its text
+   unmodified.
+2. **Required sections present**, in order, none missing, none extra. Non-conditional
+   sections appear even when empty, with a muted explanation rather than being dropped.
+3. **Conditional sections gated correctly.** The incomplete-diagnosis notice appears if
    and only if an `AgentAccessDenied` occurred. The propagation section appears if and
    only if the trigger fired.
-3. **Chain table complete.** All six hops present, each with a verdict or a
+4. **Chain table complete.** All six hops present, each with a verdict or a
    not-applicable / not-evaluated marker.
-4. **Findings match the table.** Every hop's finding severity agrees with its table row.
+5. **Findings match the table.** Every hop's finding severity agrees with its table row.
    No finding without a table row, no table row without a finding or marker.
 
 ### Verdict integrity (4)
 
-5. **No plain "allowed" verdict anywhere.** No ✅ against a hop, and no phrasing that
+6. **No plain "allowed" verdict anywhere.** No ✅ against a hop, and no phrasing that
    asserts a hop definitively permits the call.
-6. **Root cause consistency.** If any hop is `DENIED_BY`, the root cause is the earliest
+7. **Root cause consistency.** If any hop is `DENIED_BY`, the root cause is the earliest
    such hop. If none is, the root cause is a service-specific cause or undetermined.
-7. **Deny kind stated** whenever a root cause was identified, and the remediation
+8. **Deny kind stated** whenever a root cause was identified, and the remediation
    matches it — no policy proposal for an explicit deny.
-8. **Every `CANNOT_DETERMINE` names its missing evidence.** A bare "cannot determine"
+9. **Every `CANNOT_DETERMINE` names its missing evidence.** A bare "cannot determine"
    with no reason fails validation.
 
 ### Substitution and safety (3)
 
-9. **No unsubstituted placeholders.** No `<...>` or `[...]` tokens remain outside fenced
-   code blocks.
-10. **No `"Resource": "*"`** in any proposed policy block.
-11. **No credential material.** No secret values, access keys, or session tokens
+10. **No unsubstituted placeholders.** No `<...>` or `[...]` tokens remain outside fenced
+    code blocks.
+11. **No `"Resource": "*"`** in any proposed policy block.
+12. **No credential material.** No secret values, access keys, or session tokens
     anywhere in the output. ARNs and aliases only.
 
-### Completeness (1)
+### Completeness (2)
 
-12. **Limitations section present and populated**, including one entry per
+13. **Limitations section present and populated**, including one entry per
     `CANNOT_DETERMINE` hop.
+14. **Every computed value was computed, not estimated.** Any elapsed time, count, or
+    interval in the report — notably the seconds between a grant event and a denial — must
+    come from arithmetic on the collected timestamps, never from an approximation. If a
+    value could not be computed, write "not determined" rather than a rounded guess.
 
 ## Artifact naming
 

@@ -38,8 +38,15 @@ All notable changes to this skill are documented here. New entries go at the top
   Wildcard resources are never emitted.
 - Distinction between an agent-side permission gap and a customer-side finding, so a read
   the agent could not perform is never reported as an absent configuration.
-- Twelve pre-render validation checks, including one that fails the report if any hop is
-  asserted as definitively allowed.
+- Fourteen pre-render validation checks, including one that fails the report if any hop is
+  asserted as definitively allowed, and one that fails it if a computed value was
+  approximated rather than calculated.
+- Mandatory AI-generated banner on every report, required because the output proposes IAM
+  policy changes.
+- Output discipline rules: no narration of API calls, plans, or reasoning, and no
+  post-delivery summary that could be read in place of the report.
+- User-facing error handling table with graceful degradation on every condition — a single
+  failed read marks its hop and continues rather than aborting the diagnosis.
 - CloudFormation grant for `iam:SimulatePrincipalPolicy`, which is not part of the
   `AIDevOpsAgentAccessPolicy` managed policy.
 
