@@ -1,25 +1,23 @@
 ---
 name: aiml-access-diagnostics
 description: >
-  Diagnoses IAM and access failures for AI/ML service calls. Traces the full
-  authorization chain — caller identity, iam:PassRole, role trust policy, role
-  permissions, resource policies, and SCPs — to identify which hop denied the
-  call, then proposes a scoped IAM policy for review. Read-only.
+  Diagnoses IAM and access failures for Amazon Bedrock and SageMaker. Traces the
+  authorization chain — caller identity, iam:PassRole, trust policy, role
+  permissions, resource policies, SCPs — to name the denying hop and propose a
+  scoped policy. Read-only.
 
-  Use when an AI/ML API call fails with a permission error: Bedrock InvokeModel
-  or Converse AccessDeniedException, SageMaker CreateTrainingJob or
-  CreateEndpoint AccessDenied, "is not authorized to perform", "not authorized
-  to perform: iam:PassRole", or when a service execution role cannot reach S3,
-  ECR, or KMS. Also covers Bedrock model-subscription and AWS Marketplace
-  denials that are not IAM gaps, and access failures that surface under
-  non-access error codes: SageMaker ValidationException "Could not assume role"
-  (a role trust-policy gap) and ValidationException "No S3 objects found under
-  S3 URL" (often the execution role cannot list the prefix).
+  Use when a Bedrock or SageMaker call fails on permissions: InvokeModel or
+  Converse AccessDeniedException, CreateTrainingJob or CreateEndpoint
+  AccessDenied, "is not authorized to perform", "not authorized to perform:
+  iam:PassRole", or an execution role that cannot reach S3, ECR, or KMS. Also
+  covers Marketplace and model-subscription denials that are not IAM gaps, and
+  failures under non-access codes: ValidationException "Could not assume role"
+  (trust-policy gap) or "No S3 objects found under S3 URL" (execution role
+  cannot list the prefix).
 
-  Do NOT use for general IAM questions unrelated to AI/ML, IAM policy authoring
-  or least-privilege review without a failure, Bedrock throttling or quota
-  errors (ThrottlingException, ServiceQuotaExceeded), model quality or inference
-  accuracy issues, or access failures in non-AI/ML services.
+  Do NOT use for IAM questions outside AI/ML, policy authoring or least-privilege
+  review without a failure, throttling or quota errors (ThrottlingException),
+  model quality issues, or non-AI/ML services.
 metadata:
   author: tamrish
   version: "1.1.0"

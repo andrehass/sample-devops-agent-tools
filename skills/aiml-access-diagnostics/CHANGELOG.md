@@ -39,6 +39,9 @@ item below is a case the 1.0.0 logic would have diagnosed incorrectly.
   positive, blaming hop 1).
 - A denial carrying non-empty `MissingContextValues` is no longer treated as evidence of a
   permission gap anywhere in the finding logic.
+- Frontmatter `description` condensed to fit the DevOps Agent upload limit of 1024
+  characters, which rejects the skill outright when exceeded. All trigger and exclusion
+  phrases were preserved.
 
 ## [1.0.0] - 2026-08-11
 
