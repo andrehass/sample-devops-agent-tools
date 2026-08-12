@@ -1,0 +1,82 @@
+[
+  {
+    "id": "aiml-access-chain-hops",
+    "prompt": "According to the skill, what is the authorization chain it walks, and in what order? No AWS access required.",
+    "expected_output": "Names the six hops in order: caller action, iam:PassRole, role trust policy, role permissions, resource policy, organization SCP.",
+    "files": [],
+    "assertions": [
+      "contains 'PassRole'",
+      "contains 'trust' or contains 'Trust'",
+      "contains 'resource policy' or contains 'Resource policy'",
+      "contains 'SCP' or contains 'service control'"
+    ]
+  },
+  {
+    "id": "aiml-access-verdict-states",
+    "prompt": "What verdict states can the skill assign to a hop, and why is there no plain 'allowed' verdict? No AWS access required.",
+    "expected_output": "Names DENIED_BY, ALLOWED_BUT_UNVERIFIABLE, and CANNOT_DETERMINE, and explains that no verdict asserts a definitive allow because simulation can diverge from live behavior.",
+    "assertions": [
+      "contains 'DENIED_BY'",
+      "contains 'ALLOWED_BUT_UNVERIFIABLE'",
+      "contains 'CANNOT_DETERMINE'"
+    ]
+  },
+  {
+    "id": "aiml-access-two-passrole-modes",
+    "prompt": "A SageMaker CreateTrainingJob call fails with AccessDenied. According to the skill, what are the two distinct PassRole-related failure modes and why do they need to be distinguished? No AWS access required.",
+    "expected_output": "Distinguishes the caller missing iam:PassRole from the execution role's trust policy not allowing sagemaker.amazonaws.com, and notes the fixes are in different places.",
+    "assertions": [
+      "contains 'iam:PassRole' or contains 'PassRole'",
+      "contains 'trust' or contains 'Trust'",
+      "contains 'sagemaker.amazonaws.com'"
+    ]
+  },
+  {
+    "id": "aiml-access-bedrock-non-iam-causes",
+    "prompt": "Bedrock InvokeModel returns AccessDeniedException but the caller's IAM policy allows bedrock:InvokeModel. According to the skill, what non-IAM causes should be ruled out? No AWS access required.",
+    "expected_output": "Names model access not enabled, AWS Marketplace permissions for third-party models, propagation delay, and region mismatch.",
+    "assertions": [
+      "contains 'model access' or contains 'Model access'",
+      "contains 'Marketplace' or contains 'marketplace'",
+      "contains 'propagation' or contains 'Propagation'",
+      "contains 'region' or contains 'Region'"
+    ]
+  },
+  {
+    "id": "aiml-access-explicit-vs-implicit",
+    "prompt": "According to the skill, why does it matter whether a denial is implicit or explicit? No AWS access required.",
+    "expected_output": "Explains that an explicit deny overrides all allows so adding a permission will not help, while an implicit deny is resolved by adding a scoped allow.",
+    "assertions": [
+      "contains 'explicit'",
+      "contains 'implicit'",
+      "contains 'override' or contains 'will not' or contains 'cannot'"
+    ]
+  },
+  {
+    "id": "aiml-access-read-only-boundary",
+    "prompt": "What write operations is this skill permitted to perform, and where is that actually enforced? No AWS access required.",
+    "expected_output": "States the skill performs no write operations and never applies a policy, and that enforcement ultimately comes from the agent role's IAM permissions rather than from the skill's instructions.",
+    "assertions": [
+      "contains 'read-only' or contains 'read only' or contains 'no write'",
+      "contains 'IAM'"
+    ]
+  },
+  {
+    "id": "aiml-access-cross-account-boundary",
+    "prompt": "A Bedrock model in another account returns AccessDenied. According to the skill, what can it determine and what can it not? No AWS access required.",
+    "expected_output": "States the caller side is verifiable including per-policy-type attribution, while the remote account's resource policy and SCPs are not readable, and names what must be checked in the remote account.",
+    "assertions": [
+      "contains 'caller' or contains 'Caller'",
+      "contains 'remote' or contains 'other account' or contains 'cannot'"
+    ]
+  },
+  {
+    "id": "aiml-access-out-of-scope",
+    "prompt": "Does this skill handle Amazon Textract access-denied errors or Bedrock throttling errors? No AWS access required.",
+    "expected_output": "States that Textract is not a supported service in this version and should be reported as unsupported, and that throttling and quota errors are explicitly out of scope.",
+    "assertions": [
+      "contains 'not supported' or contains 'unsupported' or contains 'out of scope'",
+      "contains 'throttl' or contains 'Throttl' or contains 'quota'"
+    ]
+  }
+]

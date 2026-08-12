@@ -111,6 +111,14 @@ Parameters:
     AllowedValues: ['true', 'false']
     Default: 'true'
 
+  EnableAimlAccessDiagnostics:
+    Type: String
+    Description: >
+      AI/ML Access Diagnostics skill (adds iam:SimulatePrincipalPolicy, which is not
+      part of the AIDevOpsAgentAccessPolicy managed policy).
+    AllowedValues: ['true', 'false']
+    Default: 'true'
+
 Conditions:
   CreateNewRole: !Equals [!Ref ExistingRoleName, '']
   SkillAwsHealthEvents: !Equals [!Ref EnableAwsHealthEvents, 'true']
@@ -120,6 +128,7 @@ Conditions:
   SkillMskOperations: !Equals [!Ref EnableMskOperations, 'true']
   SkillServiceQuotaCheck: !Equals [!Ref EnableServiceQuotaCheck, 'true']
   SkillDmsOperationReview: !Equals [!Ref EnableDmsOperationReview, 'true']
+  SkillAimlAccessDiagnostics: !Equals [!Ref EnableAimlAccessDiagnostics, 'true']
   HasRegionRestriction: !Not [!Equals [!Join ['', !Ref AllowedRegions], '']]
 
 Resources:
@@ -302,6 +311,32 @@ Resources:
               - dms:TestConnection
             Resource: '*'
 
+  # aiml-access-diagnostics: adds iam:SimulatePrincipalPolicy
+  #
+  # This is the only action the skill needs that AIDevOpsAgentAccessPolicy does not
+  # already grant. Everything else it uses (cloudtrail:LookupEvents, the iam:Get*/List*
+  # reads, organizations:Describe*/List*, bedrock:Get*/List*, sagemaker:Describe*/List*,
+  # kms:GetKeyPolicy, s3:GetBucketPolicy) is covered by the managed policy.
+  #
+  # SimulatePrincipalPolicy is read-only: AWS documents that it does not perform the API
+  # operations it evaluates, only the authorization check. Resource must be '*' because
+  # the principals being simulated are not known at deploy time.
+  PolicyAimlAccessDiagnostics:
+    Type: AWS::IAM::Policy
+    Condition: SkillAimlAccessDiagnostics
+    Properties:
+      PolicyName: DevOpsAgentSkill-AimlAccessDiagnostics
+      Roles:
+        - !If [CreateNewRole, !Ref DevOpsAgentRole, !Ref ExistingRoleName]
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: SimulatePrincipalPolicyForAccessDiagnosis
+            Effect: Allow
+            Action:
+              - iam:SimulatePrincipalPolicy
+            Resource: '*'
+
   # Optional: restrict agent to specific regions
   PolicyRegionalRestriction:
     Type: AWS::IAM::Policy
@@ -349,6 +384,7 @@ Outputs:
         - msk-operations: ${EnableMskOperations} (kafka:GetBootstrapBrokers)
         - service-quota-check: ${EnableServiceQuotaCheck} (servicequotas:*, cloudwatch:GetMetricData/GetMetricStatistics)
         - database-migration-service-expertise: ${EnableDmsOperationReview} (dms:TestConnection)
+        - aiml-access-diagnostics: ${EnableAimlAccessDiagnostics} (iam:SimulatePrincipalPolicy)
       Skills covered by AIDevOpsAgentAccessPolicy (no extra policy needed):
         - eks-operation-review, enrich-with-aws-security-agent, crm-production-investigation-guidelines
       No IAM required:
