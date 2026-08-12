@@ -11,7 +11,10 @@ description: >
   CreateEndpoint AccessDenied, "is not authorized to perform", "not authorized
   to perform: iam:PassRole", or when a service execution role cannot reach S3,
   ECR, or KMS. Also covers Bedrock model-subscription and AWS Marketplace
-  denials that are not IAM gaps.
+  denials that are not IAM gaps, and access failures that surface under
+  non-access error codes: SageMaker ValidationException "Could not assume role"
+  (a role trust-policy gap) and ValidationException "No S3 objects found under
+  S3 URL" (often the execution role cannot list the prefix).
 
   Do NOT use for general IAM questions unrelated to AI/ML, IAM policy authoring
   or least-privilege review without a failure, Bedrock throttling or quota
@@ -19,7 +22,7 @@ description: >
   accuracy issues, or access failures in non-AI/ML services.
 metadata:
   author: tamrish
-  version: "1.0.0"
+  version: "1.1.0"
   aws-devops-agent-skills.agent-types: "Chat tasks, Incident RCA"
   aws-devops-agent-skills.aws-services: "Amazon Bedrock, Amazon SageMaker, AWS IAM"
   aws-devops-agent-skills.technical-domains: "Security"

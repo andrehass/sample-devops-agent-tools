@@ -25,12 +25,25 @@ opposite of Bedrock invocation, where hops 2–4 do not exist.
 This table is the core of SageMaker access diagnosis. All four produce an
 `AccessDenied` that a customer will describe the same way.
 
-| # | Hop | What is missing | Who needs the fix |
-|---|---|---|---|
-| 1 | 1 | Caller lacks `sagemaker:CreateTrainingJob` | Caller's policy |
-| 2 | 2 | Caller lacks `iam:PassRole` for the execution role | Caller's policy |
-| 3 | 3 | Execution role's trust policy omits `sagemaker.amazonaws.com` | Execution role trust policy |
-| 4 | 4 | Execution role cannot reach S3, ECR, CloudWatch, or KMS | Execution role's permissions |
+| # | Hop | What is missing | Observed `errorCode` | Who needs the fix |
+|---|---|---|---|---|
+| 1 | 1 | Caller lacks `sagemaker:CreateTrainingJob` | `AccessDeniedException` | Caller's policy |
+| 2 | 2 | Caller lacks `iam:PassRole` for the execution role | `AccessDeniedException` | Caller's policy |
+| 3 | 3 | Execution role's trust policy omits `sagemaker.amazonaws.com` | **`ValidationException`** — "Could not assume role" | Execution role trust policy |
+| 4 | 4 | Execution role cannot reach S3, ECR, CloudWatch, or KMS | `AccessDenied` at runtime, or **`ValidationException`** — "No S3 objects found under S3 URL" at create-time | Execution role's permissions |
+
+**The error codes are the fastest discriminator, and two of them are not access codes.**
+Modes 1 and 2 both return `AccessDeniedException` and must be separated by reading the
+policies. Modes 3 and 4, however, return `ValidationException` — so a diagnosis that
+filters CloudTrail for `AccessDenied` will not find them at all and will wrongly conclude
+that no denial occurred.
+
+Mode 4 at create-time is the most deceptive: SageMaker validates the S3 input path using
+the **execution role**, not the caller. If the execution role lacks `s3:ListBucket` on the
+input prefix, `CreateTrainingJob` fails with "No S3 objects found under S3 URL", which
+reads as missing data. The objects may exist and be readable by the caller. Verify the
+objects independently — with `s3:ListBucket` as the agent, or by asking the user — before
+reporting a data problem. If they exist, the cause is the execution role's S3 permissions.
 
 Modes 2 and 3 are the pair most often conflated. Both are "PassRole problems" in casual
 description, but the fix locations are different — one is the caller's identity policy,

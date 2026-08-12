@@ -96,6 +96,7 @@ Applies only when the call passes a role to a service.
 **Service principal not permitted:**
 - verdict: `DENIED_BY`
 - body: "The role `[role ARN]` does not trust `[service principal]`. Its trust policy permits: `[list of principals found]`. Even with `iam:PassRole` granted on the caller, the service cannot assume this role. Add `[service principal]` to the role's trust policy. This is the second of the two PassRole failure modes and is frequently mistaken for the first — the symptoms are nearly identical."
+- evidence note: this hop does **not** produce an `AccessDenied`. It surfaces as `ValidationException` with "Could not assume role `[role ARN]`". Treat that message as direct evidence for this finding and cite it. Its absence from an `AccessDenied`-filtered CloudTrail query is not evidence that this hop passed.
 
 **Service principal permitted:**
 - verdict: `ALLOWED_BUT_UNVERIFIABLE`

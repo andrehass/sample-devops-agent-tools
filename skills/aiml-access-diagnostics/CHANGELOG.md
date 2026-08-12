@@ -2,6 +2,31 @@
 
 All notable changes to this skill are documented here. New entries go at the top.
 
+## [1.1.0] - 2026-08-12
+
+Corrections from end-to-end validation against live Bedrock and SageMaker denials. Each
+item below is a case the 1.0.0 logic would have diagnosed incorrectly.
+
+### Fixed
+
+- CloudTrail event selection no longer filters on `AccessDenied` alone. Two of the four
+  SageMaker failure modes return `ValidationException`, so an `AccessDenied`-only query
+  found neither and would have concluded that no denial occurred.
+- Hop 3 (role trust policy) now documents its real signal: `ValidationException` with
+  "Could not assume role", not an access error code. Added as evidence guidance on the
+  finding, and to the activation description so the skill triggers on it.
+- Hop 4 create-time S3 failures now documented as `ValidationException` with "No S3
+  objects found under S3 URL". SageMaker validates the input path using the *execution
+  role*, so a role lacking `s3:ListBucket` causes an object that exists to be reported as
+  absent. Verified with a control job differing only in S3 permissions. Previously this
+  would have been diagnosed as missing data.
+- `cloudtrail:LookupEvents` documented as region-scoped. It returns only events from the
+  queried region even with a multi-region trail, so the region-mismatch cause this skill
+  claims to diagnose was invisible when querying the default region alone.
+- Model deprecation added as a non-IAM cause. A legacy model returns
+  `ResourceNotFoundException` whose message begins "Access denied", which must not be
+  diagnosed as a permissions gap.
+
 ## [1.0.0] - 2026-08-11
 
 ### Added

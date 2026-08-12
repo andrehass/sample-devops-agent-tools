@@ -86,8 +86,35 @@ and locate the event.
 ### Phase 2 — CloudTrail (required before simulation)
 
 `cloudtrail:LookupEvents` for the failed call. Filter by `EventName` where known,
-otherwise by `EventSource` plus time window, and select events carrying an
-`errorCode` of `AccessDenied` or `AccessDeniedException`.
+otherwise by `EventSource` plus time window.
+
+**`LookupEvents` is region-scoped.** It returns only events recorded in the region the
+API call is made against, even when a multi-region trail exists. Query the region the
+failing call was made in. If that region is unknown, query the caller's default region
+*and* every region named in the user's report or in the relevant resource ARNs. A
+region-mismatch denial is invisible from the wrong region, and concluding `NoEventFound`
+from a single-region lookup will produce exactly the wrong answer for the region-mismatch
+cause described in `svc-bedrock.md`.
+
+**Do not select on `errorCode: AccessDenied` alone.** Access failures in these services
+surface under several error codes, and two of the most important ones are not access
+codes at all. Select any event whose `errorCode` or `errorMessage` matches the table
+below.
+
+| `errorCode` | Message shape | What it actually means |
+|---|---|---|
+| `AccessDenied`, `AccessDeniedException` | "is not authorized to perform" | Hop 1, 2, 5, or 6 denial |
+| `AccessDenied` + "with an explicit deny" | "with an explicit deny in a(n) identity-based policy" | Explicit deny — names the policy type |
+| `ValidationException` | "Could not assume role" | **Hop 3** — the role's trust policy does not permit the service. Not an access code, but it is an access failure. |
+| `ValidationException` | "No S3 objects found under S3 URL" | **Hop 4** — frequently the execution role cannot list the prefix. Verify before accepting "data is missing". |
+| `ResourceNotFoundException` | "Access denied … marked by provider as Legacy" | Model deprecation, **not** permissions. Do not diagnose as IAM. |
+
+The last three are the reason this table exists: the message wording points away from the
+true cause. `ValidationException: No S3 objects found` reads as a missing-data problem and
+is commonly a permissions problem, because SageMaker validates the S3 path at
+create-time *using the execution role* — if that role lacks `s3:ListBucket`, an object
+that plainly exists is reported as absent. Confirm the object's existence independently
+before reporting a data problem.
 
 Capture per event: `eventTime`, `eventSource`, `eventName`, `userIdentity.arn`,
 `userIdentity.type`, `requestParameters`, `errorCode`, `errorMessage`,
