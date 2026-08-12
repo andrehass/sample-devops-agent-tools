@@ -87,6 +87,14 @@ Two things to check when hop 2 denies:
   actually receiving the role? A condition naming a different service denies the pass
   while looking correctly configured.
 
+**Simulating this hop requires the condition key.** Because the pattern above is the
+recommended one, most correctly configured callers carry that condition — and
+`SimulatePrincipalPolicy` returns `implicitDeny` for them unless
+`iam:PassedToService=sagemaker.amazonaws.com` is passed as a context entry. Verified
+against a live role: denied without the key, allowed with it. Never report a hop-2 denial
+from a simulation that omitted it. See the simulation phase in
+https://github.com/aws-samples/sample-devops-agent-tools/blob/main/skills/aiml-access-diagnostics/references/data-collection.md
+
 ## Hop 3 — Trust policy specifics
 
 The execution role's trust policy must allow `sagemaker.amazonaws.com` to assume it:

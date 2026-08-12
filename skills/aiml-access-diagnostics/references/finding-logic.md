@@ -79,9 +79,25 @@ cause lies outside what simulation can model.
 
 Applies only when the call passes a role to a service.
 
-**Explicit or implicit deny:**
+**Before emitting any hop-2 denial:** confirm the simulation supplied an
+`iam:PassedToService` context entry naming the service that receives the role, and that
+`MissingContextValues` came back empty. A `PassRole` simulation run without that key
+returns `implicitDeny` for correctly configured callers, because AWS's recommended
+scoping pattern puts a condition on exactly that key. Re-simulate with it before
+concluding anything. If the receiving service cannot be determined, this hop is
+`CANNOT_DETERMINE`.
+
+Emitting a false hop-2 denial is the most damaging error this skill can make: it sends
+the customer to add a permission they already hold, and the real cause — usually the
+trust policy at hop 3 — is never reported.
+
+**Explicit or implicit deny (with context keys supplied and no missing values):**
 - verdict: `DENIED_BY`
 - body: "The caller `[principal ARN]` is not permitted `iam:PassRole` for `[role ARN]`. The caller has permission to invoke `[action]`, but handing a role to a service is a separate permission, and it is missing. This is one of two distinct PassRole failures — this one is on the **caller**. The other is the role's trust policy, evaluated at hop 3."
+
+**Denied, but condition keys were missing from the simulation:**
+- verdict: `CANNOT_DETERMINE`
+- body: "The simulation returned a denial for `iam:PassRole` on `[role ARN]`, but it reported missing condition keys: `[MissingContextValues]`. The caller's policy scopes `PassRole` with a condition, and the simulation could not evaluate it, so this denial is not reliable. Confirm the value of `[key]` for this call before treating hop 2 as the cause."
 
 **Allowed:**
 - verdict: `ALLOWED_BUT_UNVERIFIABLE`

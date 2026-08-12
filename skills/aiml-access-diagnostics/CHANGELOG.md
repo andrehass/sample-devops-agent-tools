@@ -26,6 +26,19 @@ item below is a case the 1.0.0 logic would have diagnosed incorrectly.
 - Model deprecation added as a non-IAM cause. A legacy model returns
   `ResourceNotFoundException` whose message begins "Access denied", which must not be
   diagnosed as a permissions gap.
+- `iam:PassRole` simulation now requires an `iam:PassedToService` context entry. Without
+  it the condition in AWS's own recommended scoping pattern cannot be satisfied, and the
+  simulator returns `implicitDeny` for a correctly configured caller. Verified both ways
+  against a live role. This was the most damaging defect found: it would have sent
+  customers to add a permission they already held while the real cause at hop 3 went
+  unreported. Hop 2 now refuses to emit a denial when condition keys were missing, and
+  returns `CANNOT_DETERMINE` instead.
+- `ResourceArns` documented as mandatory, with evidence that omitting it errs in both
+  directions — an `Allow` on `*` with a resource-specific `Deny` simulates as `allowed`
+  (false negative), while a region-scoped `Allow` simulates as `implicitDeny` (false
+  positive, blaming hop 1).
+- A denial carrying non-empty `MissingContextValues` is no longer treated as evidence of a
+  permission gap anywhere in the finding logic.
 
 ## [1.0.0] - 2026-08-11
 

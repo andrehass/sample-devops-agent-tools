@@ -162,6 +162,37 @@ For organization context:
 - `PolicySourceArn` — the principal from the error
 - `ActionNames` — the failed action, plus hop-4 downstream actions when a role is in play
 - `ResourceArns` — the specific resource, never `*`, when known
+- `ContextEntries` — required whenever the relevant statement carries a condition
+
+**`ResourceArns` is mandatory, and omitting it produces wrong answers in both
+directions.** Verified against live policies:
+
+| Policy shape | Simulated without `ResourceArns` | Simulated with the real ARN | Live result |
+|---|---|---|---|
+| `Allow` on `*` plus `Deny` on one model ARN | `allowed` | `explicitDeny` | denied |
+| `Allow` scoped to one region's ARN | `implicitDeny` | `allowed` | allowed in that region |
+
+The first is a **false negative** — the hop is reported as permitting a call that is
+explicitly denied. The second is a **false positive** — hop 1 is blamed when the real
+cause lies elsewhere, such as the region or inference-profile requirements. A wildcard
+simulation answers a different question than the one that failed, so never substitute one.
+
+**`iam:PassRole` must be simulated with an `iam:PassedToService` context entry.** This is
+the highest-consequence simulation detail in the skill. AWS's own recommended pattern
+scopes `PassRole` with a `StringEquals` condition on `iam:PassedToService`; if that key is
+not supplied, the condition cannot be satisfied, the statement does not match, and the
+simulation returns `implicitDeny` for a caller whose configuration is entirely correct.
+Verified:
+
+| Simulation | Result |
+|---|---|
+| `iam:PassRole` on the exec role, no context entries | `implicitDeny` — **false denial** |
+| Same, with `iam:PassedToService = sagemaker.amazonaws.com` | `allowed` — correct |
+| A caller whose condition names a different service, same context entry | `implicitDeny` — correctly denied |
+
+Supply the service principal that actually receives the role, taken from the failing
+operation. Without this, the skill will tell a customer to add a permission they already
+have, while the true cause — commonly the trust policy at hop 3 — goes unreported.
 
 Capture per evaluation result: `EvalActionName`, `EvalResourceName`, `EvalDecision`,
 `MatchedStatements`, `MissingContextValues`, `EvalDecisionDetails`, and
@@ -171,7 +202,10 @@ Notes:
 - `EvalDecision` is one of `allowed`, `explicitDeny`, `implicitDeny`.
 - When an explicit deny exists, it is the only entry in `MatchedStatements`.
 - `MissingContextValues` means the policy uses condition keys the simulation did not
-  supply. Results are unreliable for those actions — record and surface it.
+  supply. **A denial accompanied by a non-empty `MissingContextValues` is not evidence of
+  a permission gap.** Re-simulate with those keys supplied where their values are known
+  from the failing call. If they cannot be determined, the hop is `CANNOT_DETERMINE`, never
+  `DENIED_BY`.
 - For cross-account simulations, `EvalDecisionDetails` returns a decision per policy
   type, which is how the caller side stays diagnosable across accounts.
 
