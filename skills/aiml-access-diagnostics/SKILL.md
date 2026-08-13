@@ -265,6 +265,13 @@ mark the affected hop, and continue with what remains.
   regardless.
 - **No conclusion without evidence.** Every verdict cites the data that produced it.
   If a check could not run, the verdict is `CANNOT_DETERMINE` naming the gap.
+- **Each diagnosis stands on its own evidence.** Cite only data collected during *this*
+  diagnosis. Never carry a finding forward from an earlier turn or an earlier report in the
+  conversation — not the account's SCPs, not a role's policies, not a previous verdict.
+  Re-read what this diagnosis needs. A report that cites "established earlier" is not
+  auditable, silently propagates any error in the earlier read, and may describe a
+  configuration that has since changed. If a needed read is genuinely unavailable now, the
+  hop is `CANNOT_DETERMINE`, not an inherited answer.
 - **Policy documents are the primary evidence.** CloudTrail and simulation corroborate.
   Where a policy read and simulation disagree, the policy read wins — the sole exception is
   `AllowedByOrganizations` at hop 6, which policy reading cannot compute.

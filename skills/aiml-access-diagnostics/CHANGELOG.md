@@ -49,7 +49,16 @@ DevOps Agent runtime, and the skill misdiagnosed that as its own misconfiguratio
   reported undeterminable — while the bucket had a readable policy containing an
   `aws:SecureTransport` deny, exactly the pattern the skill instructs itself to look for.
   Every read the hop requires must now be attempted.
-- Pre-render validation grew from 14 checks to 16.
+- **Each diagnosis now stands on its own evidence.** A run cited the account's SCPs as
+  "established in earlier diagnoses this session" rather than reading them, which is not
+  auditable, propagates any error in the earlier read, and may describe a configuration that
+  has since changed. Findings must cite reads performed for the current diagnosis.
+- **`NOT_APPLICABLE` and `NOT_EVALUATED` are no longer interchangeable.** A run marked hop 5
+  `NOT_EVALUATED` for a plain foundation-model call while explaining in the body that an
+  AWS-owned model has no customer resource policy — which makes it `NOT_APPLICABLE`, since
+  there was never anything to read. `svc-bedrock.md` now states this directly instead of
+  leaving it inferable from the applicability matrix.
+- Pre-render validation grew from 14 checks to 17.
 
 ## [1.1.0] - 2026-08-12
 

@@ -18,6 +18,13 @@ IAM policy gap. Rule out the others explicitly before concluding.
 Plain model invocation passes no role, so hops 2–4 are `NOT_APPLICABLE`, not passed.
 Agents and knowledge bases do pass a service role and use the full chain.
 
+**Hop 5 on a plain foundation-model call is `NOT_APPLICABLE`, not `NOT_EVALUATED`.** A
+foundation model is AWS-owned and carries no customer resource policy, so there is nothing
+that could have been read. Reserve `NOT_EVALUATED` for a hop whose evidence exists but was
+not collected because an earlier hop denied. Hop 5 becomes applicable only when the request
+involves a custom model, a provisioned-throughput resource, a guardrail, a customer-managed
+KMS key, or a cross-account resource — each of which does have a policy worth reading.
+
 ## Actions and resource ARNs
 
 | Operation | IAM action | Resource ARN shape |

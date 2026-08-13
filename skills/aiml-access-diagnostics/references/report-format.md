@@ -218,7 +218,7 @@ include links unrelated to this diagnosis.
 
 ## Pre-render validation
 
-Run all 16 checks before delivering. Do not output the validation results.
+Run all 17 checks before delivering. Do not output the validation results.
 
 ### Structure (5)
 
@@ -249,6 +249,9 @@ Run all 16 checks before delivering. Do not output the validation results.
    with no reason fails validation.
 10. **Verdict vocabulary is closed.** Every chain-table cell and finding heading uses one
     of the six defined tokens. Any other token, or a verdict written as free prose, fails.
+    `NOT_APPLICABLE` and `NOT_EVALUATED` are not interchangeable: the first means the hop
+    does not exist for this call shape, the second means its evidence exists but was not
+    collected. A hop with nothing to read is `NOT_APPLICABLE`.
 11. **No permission grant proposed for a `RuntimeUnavailable` operation.** The report must
     not state or imply that `cloudtrail:LookupEvents` or `iam:SimulatePrincipalPolicy` is
     "not granted", nor recommend a policy change, CloudFormation template, or role edit to
@@ -264,7 +267,7 @@ Run all 16 checks before delivering. Do not output the validation results.
 14. **No credential material.** No secret values, access keys, or session tokens
     anywhere in the output. ARNs and aliases only.
 
-### Completeness (2)
+### Completeness (3)
 
 15. **Limitations section present and populated**, including one entry per
     `CANNOT_DETERMINE` hop.
@@ -272,6 +275,10 @@ Run all 16 checks before delivering. Do not output the validation results.
     interval in the report — notably the seconds between a grant event and a denial — must
     come from arithmetic on the collected timestamps, never from an approximation. If a
     value could not be computed, write "not determined" rather than a rounded guess.
+17. **No evidence inherited from an earlier turn.** Every cited fact comes from a read
+    performed for this diagnosis. Phrases such as "established earlier", "as noted in the
+    previous diagnosis", or "from earlier this session" fail the check — re-read the data or
+    mark the hop `CANNOT_DETERMINE`.
 
 ## Artifact naming
 
