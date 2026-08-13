@@ -66,6 +66,14 @@ The report is the deliverable. Conversation around it is not.
   starting, asking the user something, delivering, or erroring.
 - **Do not summarize after delivering.** The report already contains the summary;
   restating it invites a shortened paraphrase to be read instead of the report.
+- **Never assess your own performance.** Do not append a paragraph saying the diagnosis
+  worked, was correct, handled a hard case, or caught something subtle. The reader
+  evaluates the report; the report does not evaluate itself. Self-congratulation also
+  lends unearned confidence to findings whose limitations the report has just carefully
+  enumerated.
+- **Nothing follows the report** except, at most, a single line offering a next action —
+  saving an artifact, or running another failure. No recap, no restatement of the root
+  cause, no commentary on the diagnosis.
 
 ## Supported Services
 
@@ -249,7 +257,10 @@ mark the affected hop, and continue with what remains.
    persisted artifacts, also write it as
    `aiml-access-diagnosis-<service>-<YYYY-MM-DD>.md`; if not, skip the artifact.
 2. Include every required section, every hop verdict, and the proposed policy.
-3. Do not replace the report with a summary, paraphrase, or shortened variant.
+3. Do not replace the report with a summary, paraphrase, or shortened variant, and do not
+   append one after it. The report is the final content of the response, followed at most
+   by a one-line offer of a next action. Never append an assessment of how the diagnosis
+   went.
 4. This applies regardless of phrasing. "Why is this denied?", "fix my permissions",
    and "debug this AccessDenied" all yield the same full report.
 5. Always include the limitations section. A diagnosis without its caveats is the

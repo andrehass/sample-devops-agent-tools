@@ -53,6 +53,11 @@ DevOps Agent runtime, and the skill misdiagnosed that as its own misconfiguratio
   "established in earlier diagnoses this session" rather than reading them, which is not
   auditable, propagates any error in the earlier read, and may describe a configuration that
   has since changed. Findings must cite reads performed for the current diagnosis.
+- **Nothing may follow the report but a one-line offer, and never a self-assessment.** Two
+  runs appended a paragraph stating the diagnosis "worked end to end" and "nailed the
+  deceptive case". Output discipline already barred a post-delivery summary; it now also
+  bars grading the diagnosis, which lends unearned confidence to findings whose limitations
+  the report has just enumerated.
 - **`NOT_APPLICABLE` and `NOT_EVALUATED` are no longer interchangeable.** A run marked hop 5
   `NOT_EVALUATED` for a plain foundation-model call while explaining in the body that an
   AWS-owned model has no customer resource policy — which makes it `NOT_APPLICABLE`, since
