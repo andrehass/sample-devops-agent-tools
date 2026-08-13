@@ -14,11 +14,33 @@
   {
     "id": "aiml-access-verdict-states",
     "prompt": "What verdict states can the skill assign to a hop, and why is there no plain 'allowed' verdict? No AWS access required.",
-    "expected_output": "Names DENIED_BY, ALLOWED_BUT_UNVERIFIABLE, and CANNOT_DETERMINE, and explains that no verdict asserts a definitive allow because simulation can diverge from live behavior.",
+    "expected_output": "Names the closed vocabulary — DENIED_BY, WOULD_ALSO_DENY, ALLOWED_BUT_UNVERIFIABLE, CANNOT_DETERMINE, plus the NOT_APPLICABLE and NOT_EVALUATED markers — and explains that no verdict asserts a definitive allow because reading a policy cannot account for session policies, SCPs carrying conditions, or service-side gates outside IAM.",
     "assertions": [
       "contains 'DENIED_BY'",
+      "contains 'WOULD_ALSO_DENY'",
       "contains 'ALLOWED_BUT_UNVERIFIABLE'",
-      "contains 'CANNOT_DETERMINE'"
+      "contains 'CANNOT_DETERMINE'",
+      "contains 'session polic' or contains 'condition' or contains 'outside IAM'"
+    ]
+  },
+  {
+    "id": "aiml-access-would-also-deny",
+    "prompt": "A SageMaker call is denied at the trust policy, and the execution role also has no S3 permissions. According to the skill, how should each hop be reported? No AWS access required.",
+    "expected_output": "Names the trust policy as the root cause and marks the later S3 hop WOULD_ALSO_DENY, stating it is a subsequent blocker rather than the current cause, so the chain table never shows a hop as allowing while its finding says it will fail.",
+    "assertions": [
+      "contains 'WOULD_ALSO_DENY'",
+      "contains 'trust'",
+      "contains 'root cause' or contains 'earliest' or contains 'subsequent'"
+    ]
+  },
+  {
+    "id": "aiml-access-evidence-precedence",
+    "prompt": "According to the skill, which evidence is primary: reading policy documents, CloudTrail, or the IAM policy simulator? What happens when they disagree? No AWS access required.",
+    "expected_output": "States that policy documents are primary and the diagnosis stands without CloudTrail or simulation, that where a policy read and simulation disagree the policy read wins, and that the single exception is AllowedByOrganizations at the SCP hop which policy reading cannot compute.",
+    "assertions": [
+      "contains 'polic' and contains 'primary' or contains 'policy read wins'",
+      "contains 'AllowedByOrganizations' or contains 'SCP'",
+      "contains 'simulat'"
     ]
   },
   {
@@ -55,10 +77,32 @@
   {
     "id": "aiml-access-read-only-boundary",
     "prompt": "What write operations is this skill permitted to perform, and where is that actually enforced? No AWS access required.",
-    "expected_output": "States the skill performs no write operations and never applies a policy, and that enforcement ultimately comes from the agent role's IAM permissions rather than from the skill's instructions.",
+    "expected_output": "States the skill performs no write operations and never applies a policy, and that enforcement comes from the DevOps Agent permission guardrail — a session policy capping effective permissions at roughly ReadOnlyAccess — together with the agent role's IAM permissions, rather than from the skill's instructions.",
     "assertions": [
       "contains 'read-only' or contains 'read only' or contains 'no write'",
+      "contains 'guardrail' or contains 'session policy'",
       "contains 'IAM'"
+    ]
+  },
+  {
+    "id": "aiml-access-runtime-blocked-not-a-permission-gap",
+    "prompt": "The skill reports that cloudtrail:LookupEvents and iam:SimulatePrincipalPolicy were not callable. Should the user grant those permissions or deploy a CloudFormation template to fix it? No AWS access required.",
+    "expected_output": "States that no permission grant fixes this because the block is not in IAM — both actions are read-only, are granted by the managed policy or grantable, and sit inside the permission guardrail, yet are refused by the runtime. Must state that the skill requires no IAM changes and must not recommend a policy change, CloudFormation template, or role edit.",
+    "assertions": [
+      "contains 'not' and contains 'IAM'",
+      "contains 'no IAM changes' or contains 'not a permission gap' or contains 'runtime'",
+      "does not contain 'deploy the CloudFormation template'"
+    ]
+  },
+  {
+    "id": "aiml-access-misleading-error-codes",
+    "prompt": "According to the skill, which access failures do NOT surface as AccessDenied, and what does each actually mean? No AWS access required.",
+    "expected_output": "Names ValidationException 'Could not assume role' as a role trust-policy gap, ValidationException 'No S3 objects found under S3 URL' as commonly the execution role being unable to list the prefix rather than missing data, and ResourceNotFoundException with an 'Access denied' message on a legacy model as deprecation rather than permissions.",
+    "assertions": [
+      "contains 'ValidationException'",
+      "contains 'Could not assume role'",
+      "contains 'No S3 objects found'",
+      "contains 'trust'"
     ]
   },
   {
