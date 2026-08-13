@@ -41,9 +41,16 @@ that no denial occurred.
 Mode 4 at create-time is the most deceptive: SageMaker validates the S3 input path using
 the **execution role**, not the caller. If the execution role lacks `s3:ListBucket` on the
 input prefix, `CreateTrainingJob` fails with "No S3 objects found under S3 URL", which
-reads as missing data. The objects may exist and be readable by the caller. Verify the
-objects independently — with `s3:ListBucket` as the agent, or by asking the user — before
-reporting a data problem. If they exist, the cause is the execution role's S3 permissions.
+reads as missing data. The objects may exist and be readable by the caller.
+
+**You cannot check whether the objects exist**, and you do not need to. `s3:ListBucket` is
+not available to the agent and is not in the API allowlist. The reasoning that resolves
+this does not require it: if the execution role has no S3 list permission on the prefix,
+that alone produces this exact error whether or not the objects are there. So read the
+execution role's policy, and if S3 list permission is absent, report that as the cause —
+stating explicitly that object existence was not verified and does not change the finding.
+
+Never assert that the data is missing, and never assert that it exists.
 
 Modes 2 and 3 are the pair most often conflated. Both are "PassRole problems" in casual
 description, but the fix locations are different — one is the caller's identity policy,
@@ -168,6 +175,13 @@ must be checked in account B.
 Also check for a bucket policy with `aws:SecureTransport` or `s3:x-amz-server-side-encryption`
 conditions that the job does not satisfy — these deny while the permissions themselves
 look correct.
+
+**Attempt `s3:GetBucketPolicy` to do this.** Do not skip it because another S3 read was
+refused; availability is per-operation. A `NoSuchBucketPolicy` result means no policy
+exists, which is a finding. A refusal means unreadable, which is a different finding. This
+matters because bucket policies enforcing HTTPS are common and benign — one was present and
+readable in a case where the skill reported hop 5 as undeterminable without attempting the
+call. Read it, then say whether its conditions affect this job.
 
 ## Diagnostic order for SageMaker
 

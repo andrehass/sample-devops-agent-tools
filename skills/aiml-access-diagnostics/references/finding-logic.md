@@ -5,50 +5,95 @@ from `data-collection.md`. No API calls happen here — all evidence is pre-coll
 
 Use the body templates verbatim, substituting only the bracketed placeholders.
 
-## The three verdicts
+## The verdict vocabulary
 
-Every applicable hop receives exactly one.
+**This list is closed.** Every hop in the chain table and every finding heading uses one
+of these six tokens and no others. Inventing a token — or writing a verdict as prose in
+place of one — fails pre-render validation.
+
+Four verdicts for hops that were evaluated:
 
 | Verdict | Emoji | Assign when |
 |---|---|---|
 | `DENIED_BY` | ❌ | Evidence shows this hop denied the call |
+| `WOULD_ALSO_DENY` | ❌ | This hop would deny too, but an earlier hop is the operative cause |
 | `ALLOWED_BUT_UNVERIFIABLE` | ⚠️ | Evidence indicates allow, but something outside our view could still deny |
-| `CANNOT_DETERMINE` | ❓ | Required evidence was unavailable |
+| `CANNOT_DETERMINE` | ❓ | Required evidence was unavailable — always names what was missing |
 
-Plus two non-verdicts for hops that did not run:
+Two markers for hops that were not evaluated:
 
 | Marker | Assign when |
 |---|---|
 | `NOT_APPLICABLE` | The call shape does not include this hop (e.g. PassRole on `InvokeModel`) |
-| `NOT_EVALUATED` | A prior hop produced a definitive `DENIED_BY` |
+| `NOT_EVALUATED` | A prior hop denied and this hop's evidence was not collected |
+
+### `WOULD_ALSO_DENY` — why it exists
+
+A denial at hop 3 does not make hops 4 through 6 irrelevant. Their evidence is often
+already in hand, and a second defect there means the user's call still fails after
+fixing the first. Reporting that is valuable.
+
+Without this verdict the report has no honest way to say it. Marking such a hop
+`ALLOWED_BUT_UNVERIFIABLE` while the body text explains that it will fail is a direct
+self-contradiction, and it has occurred: a run reported hop 4 as "Allows (unverified)"
+in the chain table while stating in the body that the job would fail again on S3.
+
+Assign `WOULD_ALSO_DENY` when the evidence for a hop below the denying hop independently
+shows a denial. Keep the root cause on the **earliest** denying hop, and say plainly in
+the finding that this one is a subsequent blocker rather than the current cause. If a
+hop below the denial was simply not investigated, it is `NOT_EVALUATED`, not this.
 
 ### Why there is no plain "ALLOWED"
 
-There is no verdict asserting the hop permits the call. The strongest available
-evidence is that the policies we could read, evaluated by a simulator AWS documents as
-possibly diverging from the live environment, indicate an allow. That is
+There is no verdict asserting the hop permits the call. The strongest available evidence
+is that the policy documents we could read indicate an allow — which cannot account for
+session policies, conditional SCPs, or service-side gates outside IAM. That is
 `ALLOWED_BUT_UNVERIFIABLE`.
 
 Collapsing it into "allowed" is the primary way this skill produces a wrong answer:
 reporting the caller's permissions as correct when an SCP with conditions, a session
 policy, or a service-specific gate is the real cause.
 
-### Verdict assignment from simulation
+### Verdict assignment from policy reads
 
-| `EvalDecision` | Additional signal | Verdict |
+Policy documents are the primary evidence. Assign from what the documents say, evaluated
+against the action, the resource ARN including its account and region fields, and every
+condition key the failing call actually supplied.
+
+| Policy-read outcome | Verdict |
+|---|---|
+| A matching `Deny` statement applies | `DENIED_BY` (explicit) |
+| No statement grants the action on that resource | `DENIED_BY` (implicit) |
+| A grant exists but a condition key is unmet | `DENIED_BY`, naming the condition |
+| A grant exists, matches the resource, conditions satisfied | `ALLOWED_BUT_UNVERIFIABLE` |
+| A grant exists but whether a condition holds cannot be established | `CANNOT_DETERMINE`, naming the key |
+| The policy could not be read (`AgentAccessDenied`) | `CANNOT_DETERMINE`, naming the operation |
+| The read is not callable in this environment (`RuntimeUnavailable`) | `CANNOT_DETERMINE`, naming the operation and stating no grant fixes it |
+
+### Corroboration from simulation, when available
+
+Simulation is optional and frequently unavailable. When it did run, use it to corroborate
+a policy read — never to overturn one.
+
+| `EvalDecision` | Additional signal | Effect |
 |---|---|---|
-| `explicitDeny` | — | `DENIED_BY` (explicit) |
-| `implicitDeny` | — | `DENIED_BY` (implicit) |
-| `allowed` | `allowed_by_organizations` is `false` | `DENIED_BY` (SCP) — report at hop 6 |
-| `allowed` | `missing_context_values` non-empty | `CANNOT_DETERMINE` |
-| `allowed` | clean | `ALLOWED_BUT_UNVERIFIABLE` |
-| simulation status `AgentAccessDenied` | — | `CANNOT_DETERMINE` + agent-gap notice |
+| `explicitDeny` | — | Corroborates `DENIED_BY` (explicit) |
+| `implicitDeny` | `missing_context_values` empty | Corroborates `DENIED_BY` (implicit) |
+| `implicitDeny` | `missing_context_values` non-empty | **Discard.** Not evidence of anything. |
+| `allowed` | `allowed_by_organizations` is `false` | `DENIED_BY` (SCP) at hop 6 — the one thing only simulation shows |
+| `allowed` | clean | Corroborates `ALLOWED_BUT_UNVERIFIABLE` |
 
-CloudTrail overrides simulation on the question of what happened. If CloudTrail shows a
-denial and simulation says `allowed`, the verdict for that hop is `CANNOT_DETERMINE`
-with the divergence stated explicitly — never `ALLOWED_BUT_UNVERIFIABLE`. That
-divergence is itself the most valuable finding in the report, because it means the
-cause lies outside what simulation can model.
+**Where simulation and a policy read disagree, the policy read wins**, with one exception:
+`allowed_by_organizations` at hop 6, which policy reading cannot compute.
+
+This ordering is not a preference. For hop 2 simulation is measurably wrong on correctly
+configured callers unless `iam:PassedToService` is supplied, and for hop 3 it cannot
+evaluate trust policies at all. See `data-collection.md`.
+
+If CloudTrail was available and shows a denial while the policies read as an allow, the
+hop is `CANNOT_DETERMINE` with the divergence stated explicitly — never
+`ALLOWED_BUT_UNVERIFIABLE`. That divergence is itself a valuable finding, because it means
+the cause lies outside what the readable policies model.
 
 ## Hop 1 — Caller action
 
@@ -207,21 +252,52 @@ Render as a paired finding:
 
   Cross-account calls require **both** an identity-based allow here and a resource-based allow there. A verified caller side is necessary but not sufficient."
 
-## Agent permission gap
+## Incomplete-diagnosis notice
 
-When any collection step returns `AgentAccessDenied`, this is a problem with the
-skill's own setup, not a finding about the customer's configuration. Render it as a
-notice above the findings, and never let it masquerade as a customer-side result.
+Two different things can limit a diagnosis, they have different remedies, and conflating
+them produces a false remediation. Render whichever applies as a notice above the
+findings, and never let either masquerade as a customer-side result.
 
-- body: "⚠️ **Incomplete diagnosis — the agent lacks a required permission.** The following reads were denied to the agent itself: `[list of operations]`. Affected hops are reported as `CANNOT_DETERMINE`. This is a skill-configuration gap, not a finding about your environment. Grant the agent role the actions listed and re-run. If `iam:SimulatePrincipalPolicy` is among them, deploy the CloudFormation template in this repository — that permission is not part of the `AIDevOpsAgentAccessPolicy` managed policy."
+### Runtime restriction — `RuntimeUnavailable`
+
+The environment refused or deferred the operation before it reached AWS. **No permission
+grant fixes this.** Do not recommend one.
+
+- body: "⚠️ **Partial diagnosis — operations unavailable in this environment.** The following read-only operations were not callable here: `[list of operations]`. This is a characteristic of the runtime, **not** a permission gap and **not** a finding about your configuration. Granting these actions to the agent role would not change the outcome, and no CloudFormation template or policy change enables them. `[Affected hops]` were evaluated from policy documents only, which is the primary evidence path for every hop except the organization SCP decision."
+
+Applies in particular to:
+
+| Operation | What is lost |
+|---|---|
+| `cloudtrail:LookupEvents` | Independent corroboration of the failure event, `requestParameters` (the passed `RoleArn`, any `VpcConfig`), and propagation-delay detection |
+| `iam:SimulatePrincipalPolicy` | `AllowedByOrganizations` at hop 6 only. Hops 1 through 5 are decided by policy reads regardless. |
+
+State what was lost in those terms. Do not imply the diagnosis is unreliable — for hops 1
+through 5 the policy documents are the stronger evidence, and for hop 2 and hop 3 they are
+the only correct evidence.
+
+### Agent IAM gap — `AgentAccessDenied`
+
+An AWS API returned `AccessDenied` on the agent's own read. This one **is** a permission
+gap and a grant would fix it.
+
+- body: "⚠️ **Incomplete diagnosis — the agent lacks a required permission.** These reads returned `AccessDenied` for the agent itself: `[list of operations]`. Affected hops are reported as `CANNOT_DETERMINE`. This is about the agent's own permissions, not a finding about your environment. Granting the agent role these read actions and re-running would complete those hops."
+
+Never merge the two notices, and never attribute a `RuntimeUnavailable` operation to a
+missing grant. Both `cloudtrail:LookupEvents` and `iam:SimulatePrincipalPolicy` sit inside
+the agent's permission guardrail and can be granted in IAM while remaining uncallable —
+so a report claiming they are "not granted" is wrong on the facts.
 
 ## Root cause selection
 
 The report names one root cause. Select it as follows:
 
 1. The **first** hop in traversal order with verdict `DENIED_BY`.
-2. If several hops are `DENIED_BY`, the earliest one is the root cause and the rest are
-   contributing findings — fixing only a later hop will not resolve the call.
+2. If several hops deny, the earliest is the root cause. Re-mark every later denying hop
+   as `WOULD_ALSO_DENY` so the chain table stays consistent with the finding bodies, and
+   state in each that it is a subsequent blocker rather than the current cause — fixing
+   only a later hop will not resolve the call, and fixing only the root cause will not
+   either.
 3. If no hop is `DENIED_BY` but a service-specific non-IAM cause was found, that is the
    root cause.
 4. If no hop is `DENIED_BY` and no non-IAM cause was found, but CloudTrail shows a

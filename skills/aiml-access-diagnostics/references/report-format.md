@@ -13,7 +13,7 @@ traceable to the evidence that produced it.
 # AI/ML Access Diagnosis — <service> <action>
 
 ## Summary
-## ⚠️ Incomplete Diagnosis Notice        <- only if any AgentAccessDenied occurred
+## ⚠️ Partial Diagnosis Notice           <- only if any RuntimeUnavailable or AgentAccessDenied occurred
 ## ⏳ Possible Propagation Delay          <- only if the propagation trigger fired
 ## Authorization Chain
 ## Findings
@@ -100,11 +100,14 @@ Or, when undetermined:
 | 6 | Organization SCP | <emoji> <short verdict> |
 ```
 
-**Verdict-to-emoji mapping:**
+**Verdict-to-emoji mapping. This vocabulary is closed** — the six tokens defined in
+`finding-logic.md` and no others. Never write a verdict as free prose in a table cell,
+and never introduce a token absent from this table.
 
 | Verdict | Emoji | Short form |
 |---|---|---|
 | `DENIED_BY` | ❌ | `Denied here` |
+| `WOULD_ALSO_DENY` | ❌ | `Would also deny — not the current cause` |
 | `ALLOWED_BUT_UNVERIFIABLE` | ⚠️ | `Allows (unverified)` |
 | `CANNOT_DETERMINE` | ❓ | `Cannot determine` |
 | `NOT_APPLICABLE` | — | `Not applicable` |
@@ -113,6 +116,10 @@ Or, when undetermined:
 Note that ⚠️ rather than ✅ is used for the allow case. This is deliberate: no hop is
 ever asserted as definitively permitting the call. Using a green check would imply a
 certainty the evidence does not support.
+
+`WOULD_ALSO_DENY` exists so a second defect below the root cause can be stated without
+contradicting the table. If the body text says a hop will fail, its table row must not
+read `Allows (unverified)`.
 
 ## Findings
 
@@ -156,22 +163,39 @@ failure mode this skill exists to prevent.
 
 Always include:
 
-- The policy simulator does not evaluate SCPs that carry conditions, so a conditional
-  SCP can deny a call this diagnosis reports as permitted.
 - Session policies applied at role assumption are not visible in a role's attached
-  policies and can narrow permissions further.
-- AWS documents that simulator results can differ from the live environment.
-- CloudTrail delivery can lag up to approximately 15 minutes, so a very recent call may
-  not appear yet.
+  policies and can narrow permissions beyond what was read.
+- A policy document read is a static evaluation. Service-side gates outside IAM — model
+  access state, a Marketplace subscription, a resource's own encryption requirements — can
+  deny a call whose policies read as permitting it.
+- Condition keys are evaluated against the values the failing call is believed to have
+  supplied. Where an actual runtime value could not be established, the condition's
+  outcome is inferred rather than observed.
 
 Add conditionally:
 
-- For every `CANNOT_DETERMINE` hop: what could not be read and why.
+- For every `CANNOT_DETERMINE` hop: what could not be read and why, distinguishing an
+  unreadable policy from an operation the runtime does not permit.
+- When `cloudtrail:LookupEvents` was unavailable: that the failure event was not
+  independently corroborated, that `requestParameters` — the passed `RoleArn` and any
+  `VpcConfig` — could not be read, and that propagation delay could not be ruled out.
+- When `iam:SimulatePrincipalPolicy` was unavailable: that `AllowedByOrganizations` could
+  not be computed, so hop 6 rests on reading the SCP documents rather than on an evaluated
+  decision. State plainly that this does not affect hops 1 through 5, which are decided by
+  policy reads regardless.
+- When simulation **did** run: that AWS documents simulator results as possibly differing
+  from the live environment, and that the simulator does not evaluate SCPs carrying
+  conditions.
+- When CloudTrail **was** available: that delivery can lag up to approximately 15 minutes,
+  so a very recent call may not appear yet.
+- When simulation and a policy read disagree: which one the verdict followed and why.
 - For cross-account: the specific checks required in the remote account.
-- When simulation and CloudTrail disagree: that the cause lies outside what simulation
-  models.
 - When hop 4 permissions were checked: that the curated list is not exhaustive for the
   user's workload.
+- When the failure was `ValidationException: No S3 objects found`: that the objects' actual
+  existence was not verified, because `s3:ListBucket` is not available to the agent, and
+  that the finding holds either way since the execution role's missing S3 permission
+  produces this error regardless.
 
 ## References
 
@@ -194,7 +218,7 @@ include links unrelated to this diagnosis.
 
 ## Pre-render validation
 
-Run all 14 checks before delivering. Do not output the validation results.
+Run all 16 checks before delivering. Do not output the validation results.
 
 ### Structure (5)
 
@@ -202,38 +226,49 @@ Run all 14 checks before delivering. Do not output the validation results.
    unmodified.
 2. **Required sections present**, in order, none missing, none extra. Non-conditional
    sections appear even when empty, with a muted explanation rather than being dropped.
-3. **Conditional sections gated correctly.** The incomplete-diagnosis notice appears if
-   and only if an `AgentAccessDenied` occurred. The propagation section appears if and
-   only if the trigger fired.
+3. **Conditional sections gated correctly.** The partial-diagnosis notice appears if and
+   only if a `RuntimeUnavailable` or `AgentAccessDenied` occurred, and uses the matching
+   body from `finding-logic.md` for whichever applies. The propagation section appears if
+   and only if the trigger fired.
 4. **Chain table complete.** All six hops present, each with a verdict or a
    not-applicable / not-evaluated marker.
-5. **Findings match the table.** Every hop's finding severity agrees with its table row.
+5. **Findings match the table.** Every hop's finding agrees with its table row — in
+   particular, no hop whose body states it will deny may be marked `Allows (unverified)`.
    No finding without a table row, no table row without a finding or marker.
 
-### Verdict integrity (4)
+### Verdict integrity (6)
 
 6. **No plain "allowed" verdict anywhere.** No ✅ against a hop, and no phrasing that
    asserts a hop definitively permits the call.
 7. **Root cause consistency.** If any hop is `DENIED_BY`, the root cause is the earliest
-   such hop. If none is, the root cause is a service-specific cause or undetermined.
+   such hop, and every later denying hop is `WOULD_ALSO_DENY`. If none is, the root cause
+   is a service-specific cause or undetermined.
 8. **Deny kind stated** whenever a root cause was identified, and the remediation
    matches it — no policy proposal for an explicit deny.
 9. **Every `CANNOT_DETERMINE` names its missing evidence.** A bare "cannot determine"
    with no reason fails validation.
+10. **Verdict vocabulary is closed.** Every chain-table cell and finding heading uses one
+    of the six defined tokens. Any other token, or a verdict written as free prose, fails.
+11. **No permission grant proposed for a `RuntimeUnavailable` operation.** The report must
+    not state or imply that `cloudtrail:LookupEvents` or `iam:SimulatePrincipalPolicy` is
+    "not granted", nor recommend a policy change, CloudFormation template, or role edit to
+    obtain them. Those operations are refused by the runtime while permitted in IAM, so
+    such a recommendation is a false remediation. This check exists because the skill has
+    produced exactly that error.
 
 ### Substitution and safety (3)
 
-10. **No unsubstituted placeholders.** No `<...>` or `[...]` tokens remain outside fenced
+12. **No unsubstituted placeholders.** No `<...>` or `[...]` tokens remain outside fenced
     code blocks.
-11. **No `"Resource": "*"`** in any proposed policy block.
-12. **No credential material.** No secret values, access keys, or session tokens
+13. **No `"Resource": "*"`** in any proposed policy block.
+14. **No credential material.** No secret values, access keys, or session tokens
     anywhere in the output. ARNs and aliases only.
 
 ### Completeness (2)
 
-13. **Limitations section present and populated**, including one entry per
+15. **Limitations section present and populated**, including one entry per
     `CANNOT_DETERMINE` hop.
-14. **Every computed value was computed, not estimated.** Any elapsed time, count, or
+16. **Every computed value was computed, not estimated.** Any elapsed time, count, or
     interval in the report — notably the seconds between a grant event and a denial — must
     come from arithmetic on the collected timestamps, never from an approximation. If a
     value could not be computed, write "not determined" rather than a rounded guess.

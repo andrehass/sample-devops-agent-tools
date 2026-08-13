@@ -20,7 +20,7 @@ description: >
   model quality issues, or non-AI/ML services.
 metadata:
   author: tamrish
-  version: "1.1.0"
+  version: "1.2.0"
   aws-devops-agent-skills.agent-types: "Chat tasks, Incident RCA"
   aws-devops-agent-skills.aws-services: "Amazon Bedrock, Amazon SageMaker, AWS IAM"
   aws-devops-agent-skills.technical-domains: "Security"
@@ -84,17 +84,17 @@ service-specific knowledge; without it the output would be a guess.
 - **This skill (orchestrator):** request classification, chain traversal order,
   verdict assignment, report rendering.
 - **Chain model:** the six-hop authorization chain and its precedence rules —
-  [`references/access-chain-model.md`](references/access-chain-model.md)
+  `references/access-chain-model.md`
 - **Data collection:** the read-only API allowlist, error classification, and the
   structured object collection produces —
-  [`references/data-collection.md`](references/data-collection.md)
+  `references/data-collection.md`
 - **Finding logic:** verdict rules and body templates per failure class —
-  [`references/finding-logic.md`](references/finding-logic.md)
+  `references/finding-logic.md`
 - **Report format:** report structure and pre-render validation —
-  [`references/report-format.md`](references/report-format.md)
+  `references/report-format.md`
 - **Service specifics:** loaded only for the service in question —
-  [`references/svc-bedrock.md`](references/svc-bedrock.md),
-  [`references/svc-sagemaker.md`](references/svc-sagemaker.md)
+  `references/svc-bedrock.md`,
+  `references/svc-sagemaker.md`
 
 ## Step 1: Classify the request
 
@@ -128,25 +128,39 @@ is no failure to explain, say so and stop rather than producing a posture review
    different account, mark the request **cross-account** and follow the cross-account
    handling in `references/finding-logic.md`.
 
-## Step 3: Collect evidence — CloudTrail first
+## Step 3: Collect evidence — policy reads first
 
-**Order matters. CloudTrail before simulation.** The `errorMessage` on a real denial
-names the principal, action, resource, and whether the deny was explicit. That is
-direct evidence. Simulation is a model of the policies and can diverge from the live
-environment, so it is used to *explain* the denial, never to establish what happened.
+**Policy documents are the primary evidence.** Every hop except the organization SCP
+decision is decidable by reading the policies that govern it. CloudTrail and the policy
+simulator are corroboration, and the diagnosis must stand without either — in this runtime
+both are frequently unavailable, which is a characteristic of the environment rather than a
+permission gap. See `references/data-collection.md`.
 
-Collect per `references/data-collection.md`:
+Collect in this order:
 
-1. The `AccessDenied` event(s) for the failed call.
-2. **Grant events preceding the denial** — if any appear within ~10 minutes for the
-   same principal or resource, a propagation delay is possible. See
-   `references/svc-bedrock.md` for the Bedrock grant event names.
-3. The caller's identity policies, the target role's trust policy and permissions,
-   relevant resource policies, and SCP applicability.
-4. Simulation results for the specific action and resource.
+1. **The chain's policy documents.** The caller's identity policies, the target role's
+   trust policy and permissions, relevant resource policies, and the attached SCPs.
+   Evaluate each by hand: match the action, match the resource ARN including its account
+   and region fields, and check every condition key against what the failing call
+   supplied.
+2. **CloudTrail, if the runtime permits it.** Adds independent confirmation of the event
+   and, more usefully, `requestParameters` — the passed `RoleArn` and any `VpcConfig`,
+   neither of which appears in the error string.
+3. **Grant events preceding the denial**, when CloudTrail is available — if any appear
+   within ~10 minutes for the same principal or resource, a propagation delay is possible.
+   See `references/svc-bedrock.md` for the Bedrock grant event names. Without CloudTrail,
+   propagation cannot be ruled out; say so rather than ruling it out.
+4. **Simulation, if the runtime permits it.** It contributes exactly one thing policy
+   reading cannot: `AllowedByOrganizations` at hop 6. It cannot evaluate trust policies at
+   all, and at hop 2 it is measurably wrong on correctly configured callers unless
+   `iam:PassedToService` is supplied.
 
-If a collection step fails, record its status. Never infer a configuration you could
-not read.
+Where a policy read and simulation disagree, **the policy read wins**, except for
+`AllowedByOrganizations`.
+
+If a collection step fails, record its status, distinguishing an unreadable policy from an
+operation the runtime does not permit. Never infer a configuration you could not read, and
+never infer one operation's availability from another's failure.
 
 ## Step 4: Walk the chain
 
@@ -171,17 +185,25 @@ explicitly.
 
 ## Step 6: Assign verdicts
 
-Every hop gets exactly one of three verdicts. Definitions and assignment rules are in
-`references/finding-logic.md`.
+Every hop gets exactly one token from this closed set. Definitions and assignment rules
+are in `references/finding-logic.md`. Never invent a token, and never write a verdict as
+free prose in place of one.
 
 | Verdict | Meaning |
 |---|---|
 | `DENIED_BY` | This hop denied the call, with evidence |
+| `WOULD_ALSO_DENY` | This hop would deny too, but an earlier hop is the operative cause |
 | `ALLOWED_BUT_UNVERIFIABLE` | Evidence suggests allow, but something outside our view could still deny |
 | `CANNOT_DETERMINE` | Required evidence was unavailable — names what was missing |
+| `NOT_APPLICABLE` | The call shape does not include this hop |
+| `NOT_EVALUATED` | An earlier hop denied and this hop's evidence was not collected |
 
-**Never collapse `ALLOWED_BUT_UNVERIFIABLE` into an allow.** Simulation passing is not
-proof the live call succeeds.
+**Never collapse `ALLOWED_BUT_UNVERIFIABLE` into an allow.** Readable policies indicating
+an allow is not proof the live call succeeds.
+
+**Use `WOULD_ALSO_DENY` rather than contradicting yourself.** If a hop below the root cause
+independently shows a denial, mark it as such. A hop whose finding says the call will fail
+must never appear in the chain table as allowing it.
 
 ## Step 7: Propose a policy
 
@@ -207,14 +229,17 @@ mark the affected hop, and continue with what remains.
 
 | Condition | Cause | Action |
 |---|---|---|
-| `AccessDenied` on `iam:SimulatePrincipalPolicy` | The agent role lacks the grant; it is not in `AIDevOpsAgentAccessPolicy` | Continue with policy reads only. Emit the agent-gap notice and tell the user to deploy the repository's CloudFormation template. Never degrade silently. |
-| `AccessDenied` on any other read | The agent lacks that permission | Mark the affected hop `CANNOT_DETERMINE`, naming the operation. Continue. |
+| `iam:SimulatePrincipalPolicy` refused by the runtime | The environment does not permit this operation. It is **not** an IAM gap — the action sits inside the agent's permission guardrail and can be granted in IAM while remaining uncallable. | Proceed on policy reads, which decide hops 1 through 5 regardless. Emit the runtime-restriction notice. **Never** report it as "not granted" and **never** recommend a policy change, CloudFormation template, or role edit — no such fix exists. Note only that `AllowedByOrganizations` could not be computed. |
+| `cloudtrail:LookupEvents` refused or deferred by the runtime | Same — classified as requiring operator approval despite being read-only | Proceed on the user-supplied error text and policy reads. Emit the runtime-restriction notice. Do not stall waiting for approval, do not retry in a loop, and do not report it as a permission gap. State that the event was not corroborated and that propagation could not be ruled out. |
+| `AccessDenied` on any other read | The agent's IAM genuinely lacks that permission | Mark the affected hop `CANNOT_DETERMINE`, naming the operation, and emit the agent-IAM-gap notice — this one a grant would fix. Continue. |
+| One read refused | Says nothing about other operations | Still attempt every other read the hops require. Never infer a second operation's availability from the first one's failure. |
 | No CloudTrail event found | Delivery lag of up to ~15 minutes, or wrong region or time window | Proceed using the user-supplied error text. State that the event was not corroborated. Do not conclude the call never happened. |
 | Neither error text nor CloudTrail event | Nothing to diagnose | Stop. Ask for the error message, or the principal ARN plus the failed API call. |
 | Target role cannot be identified | `RoleArn` absent from the event and no Describe available | Mark hops 2 through 4 `CANNOT_DETERMINE`. Do not diagnose hop 1 alone and imply the chain is clear. |
 | Service is not Bedrock or SageMaker | Out of scope for this version | Stop and report it as unsupported. Do not attempt a generic diagnosis. |
 | Account is not in an Organization | No SCP applies | Mark hop 6 `NOT_APPLICABLE`. This is not a failure. |
-| Simulation and CloudTrail disagree | The cause lies outside what simulation models | Mark the hop `CANNOT_DETERMINE` and surface the divergence — it is itself the finding. |
+| Simulation contradicts a policy read | Simulation is a model and has known blind spots — trust policies, and `iam:PassRole` conditions | Follow the policy read. State the divergence and which one the verdict followed. Do not mark the hop `CANNOT_DETERMINE` on this basis alone. |
+| CloudTrail shows a denial the policies read as allowing | The cause lies outside the readable policies — a session policy, a conditional SCP, or a service-side gate | Mark the hop `CANNOT_DETERMINE` and surface the divergence — it is itself the finding. |
 | Request is a permissions audit with no failure | Out of scope; this skill is reactive | Say so and stop. Do not produce a posture review. |
 
 ## Final Delivery Contract
@@ -235,13 +260,21 @@ mark the affected hop, and continue with what remains.
 - **READ ONLY.** Only the operations in the allowlist in
   `references/data-collection.md` may be called. Never call any `Put*`, `Attach*`,
   `Create*`, `Update*`, or `Delete*` action. Never apply a proposed policy. Note that
-  write prevention is ultimately enforced by the agent role's IAM permissions, not by
-  this instruction — but the instruction is binding regardless.
+  write prevention is ultimately enforced by the DevOps Agent permission guardrail and the
+  agent role's IAM permissions, not by this instruction — but the instruction is binding
+  regardless.
 - **No conclusion without evidence.** Every verdict cites the data that produced it.
   If a check could not run, the verdict is `CANNOT_DETERMINE` naming the gap.
-- **CloudTrail is evidence; simulation is explanation.** Never invert this.
-- **Simulation passing is not success.** It cannot see SCPs carrying conditions, and
-  a remote account's resource policy is not readable from here.
+- **Policy documents are the primary evidence.** CloudTrail and simulation corroborate.
+  Where a policy read and simulation disagree, the policy read wins — the sole exception is
+  `AllowedByOrganizations` at hop 6, which policy reading cannot compute.
+- **A blocked operation is never an IAM finding.** `cloudtrail:LookupEvents` and
+  `iam:SimulatePrincipalPolicy` are refused by this runtime while permitted in IAM.
+  Reporting either as "not granted", or proposing a policy or CloudFormation change to
+  obtain them, is a false remediation. This skill requires no IAM changes.
+- **Readable policies indicating an allow is not success.** They cannot see session
+  policies, SCPs carrying conditions, or service-side gates outside IAM, and a remote
+  account's resource policy is not readable from here.
 - **Non-IAM causes are ruled out explicitly**, not assumed absent.
 - **Distinguish the two PassRole failures.** The caller needing `iam:PassRole` and the
   role's trust policy allowing the service principal are different problems with
@@ -261,9 +294,9 @@ mark the affected hop, and continue with what remains.
 
 ## References
 
-- [`references/access-chain-model.md`](references/access-chain-model.md) — the six-hop chain, precedence, and traversal rules
-- [`references/data-collection.md`](references/data-collection.md) — API allowlist, error classification, output schema
-- [`references/finding-logic.md`](references/finding-logic.md) — verdict rules and body templates
-- [`references/report-format.md`](references/report-format.md) — report structure and pre-render validation
-- [`references/svc-bedrock.md`](references/svc-bedrock.md) — Bedrock roles, actions, and non-IAM denial causes
-- [`references/svc-sagemaker.md`](references/svc-sagemaker.md) — SageMaker PassRole, trust policy, and execution-role minimums
+- `references/access-chain-model.md` — the six-hop chain, precedence, and traversal rules
+- `references/data-collection.md` — API allowlist, error classification, output schema
+- `references/finding-logic.md` — verdict rules and body templates
+- `references/report-format.md` — report structure and pre-render validation
+- `references/svc-bedrock.md` — Bedrock roles, actions, and non-IAM denial causes
+- `references/svc-sagemaker.md` — SageMaker PassRole, trust policy, and execution-role minimums

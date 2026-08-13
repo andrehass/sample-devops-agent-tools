@@ -47,41 +47,42 @@ This skill names the specific hop and the specific missing action instead.
 
 ### IAM Permissions
 
-Most of what this skill needs is already covered by the
+**No IAM changes are required.** Everything this skill depends on is already granted by the
 [`AIDevOpsAgentAccessPolicy`](https://docs.aws.amazon.com/aws-managed-policy/latest/reference/AIDevOpsAgentAccessPolicy.html)
-managed policy — `cloudtrail:LookupEvents`, the IAM read actions, `organizations:Describe*`
-and `List*`, `bedrock:Get*`/`List*`, `sagemaker:Describe*`/`List*`, `kms:GetKeyPolicy`,
-and `s3:GetBucketPolicy`.
+managed policy: the IAM read actions, `organizations:Describe*` and `List*`,
+`bedrock:Get*`/`List*`, `sagemaker:Describe*`/`List*`, `kms:GetKeyPolicy`,
+`s3:GetBucketPolicy`, and `ecr:GetRepositoryPolicy`. `sts:GetCallerIdentity` needs no
+permission at all.
 
-**One action is not in the managed policy and must be granted separately:**
+There is no CloudFormation template to deploy for this skill.
 
-```
-iam:SimulatePrincipalPolicy
-```
+### Runtime constraints you may observe
 
-Deploy it with the CloudFormation template in this repository:
+Two read-only operations the skill would like to use are not callable in the DevOps Agent
+runtime. Both are permitted by IAM and sit inside the agent's
+[permission guardrail](https://docs.aws.amazon.com/devopsagent/latest/userguide/aws-devops-agent-security-limiting-agent-access-in-an-aws-account.html),
+but are refused before the call reaches AWS — the observed pattern is that operations whose
+verb is not `Get`, `List`, or `Describe` are treated as potentially mutating.
 
-```bash
-aws cloudformation deploy \
-  --template-file cloudformation/devops-agent-skill-policies.yaml \
-  --stack-name devops-agent-skill-policies \
-  --parameter-overrides \
-      ExistingRoleName=<YOUR-DEVOPS-AGENT-ROLE-NAME> \
-      EnableAimlAccessDiagnostics=true \
-  --capabilities CAPABILITY_NAMED_IAM
-```
+| Operation | Behaviour | What is lost |
+|---|---|---|
+| `cloudtrail:LookupEvents` | Requires operator approval per call | Independent confirmation of the failure event, the passed `RoleArn` and any `VpcConfig` from `requestParameters`, and propagation-delay detection |
+| `iam:SimulatePrincipalPolicy` | Refused | `AllowedByOrganizations` at hop 6 only |
 
-Without it the skill still runs, but it can only read policies rather than evaluate them.
-It will say so explicitly rather than degrading silently.
+**Granting these actions does not enable them**, so the skill never asks you to. It reports
+them as an environment characteristic and continues on policy reads, which decide hops 1
+through 5 regardless — and which are the *only* correct evidence for the trust policy at
+hop 3, since simulation cannot evaluate trust policies, and for `iam:PassRole` at hop 2,
+where simulation returns a false denial for correctly configured callers.
 
-`sts:GetCallerIdentity` requires no IAM permission.
+If your environment does permit them, the skill uses them as corroboration automatically.
 
 ### AWS Resources
 
-- CloudTrail enabled in the account and region where the failure occurred. Event history
-  covers the default 90 days, which is sufficient for recent failures.
 - An actual failure to diagnose — an error message, or a principal plus the API call that
-  failed.
+  failed. Pasting the error verbatim gives the best result.
+- CloudTrail is optional. When available it adds corroboration; when not, the diagnosis
+  proceeds from the error text and the policy documents.
 
 ## Limitations
 
@@ -89,8 +90,12 @@ It will say so explicitly rather than degrading silently.
   reported as unsupported rather than diagnosed generically — the value is in the
   service-specific knowledge, and without it the output would be a guess.
 - **No verdict asserts success.** The strongest available verdict is
-  `ALLOWED_BUT_UNVERIFIABLE`. The policy simulator is a model of your policies, and AWS
-  documents that its results can differ from the live environment.
+  `ALLOWED_BUT_UNVERIFIABLE`. Reading a policy that permits an action cannot account for
+  session policies, SCPs carrying conditions, or service-side gates outside IAM.
+- **Hop 6 is weaker without simulation.** The SCP documents are read and evaluated by hand,
+  but the authoritative `AllowedByOrganizations` decision requires
+  `iam:SimulatePrincipalPolicy`, which this runtime refuses. A conditional SCP can deny a
+  call the skill reports as permitted.
 - **SCPs carrying conditions are not evaluated** by the simulator, so a conditional SCP
   can deny a call this skill reports as permitted.
 - **Session policies are invisible.** A policy passed at `AssumeRole` time narrows

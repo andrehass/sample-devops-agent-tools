@@ -2,6 +2,55 @@
 
 All notable changes to this skill are documented here. New entries go at the top.
 
+## [1.2.0] - 2026-08-12
+
+Architecture inversion, driven by running the skill against live denials in a real Agent
+Space. Two of the operations the 1.1.0 design treated as central are not callable in the
+DevOps Agent runtime, and the skill misdiagnosed that as its own misconfiguration.
+
+### Changed
+
+- **Policy reads are now the primary evidence; CloudTrail and simulation are optional
+  corroboration.** The diagnosis stands without either. Every hop except the organization
+  SCP decision is decidable from policy documents, and for two hops the documents are the
+  *only* correct evidence: simulation cannot evaluate trust policies at all (hop 3), and at
+  hop 2 it returns a false `implicitDeny` for correctly configured callers. Where a policy
+  read and simulation disagree, the policy read now wins — the sole exception being
+  `AllowedByOrganizations` at hop 6.
+- **Removed the CloudFormation grant entirely.** `iam:SimulatePrincipalPolicy` was the only
+  action this skill needed beyond `AIDevOpsAgentAccessPolicy`, and granting it changes
+  nothing because the block is not in IAM. This skill now requires no IAM changes, and the
+  repository's CloudFormation template is untouched by it.
+
+### Fixed
+
+- **A blocked operation is no longer reported as a missing permission.** Both
+  `cloudtrail:LookupEvents` and `iam:SimulatePrincipalPolicy` are read-only, are granted in
+  IAM, and sit inside the DevOps Agent permission guardrail — yet are refused before
+  reaching AWS, apparently because their verbs are not `Get`, `List`, or `Describe`. The
+  skill previously told users to deploy a CloudFormation template that had already been
+  deployed and could not have helped. Introduced a `RuntimeUnavailable` status distinct from
+  `AgentAccessDenied`, split the notice in two, and added a pre-render check that fails the
+  report if it proposes a grant for a runtime-blocked operation.
+- **Added the `WOULD_ALSO_DENY` verdict.** A run reported hop 4 as "Allows (unverified)" in
+  the chain table while stating in the body that the job would fail again on S3. There was
+  no vocabulary for a second defect below the root cause, so the report contradicted itself.
+- **Closed the verdict vocabulary.** `SKILL.md` specified three verdicts while
+  `report-format.md` defined five markers, and a run emitted `NOT_EVALUATED` as a heading
+  verdict outside the documented set. The six tokens are now fixed in one place and enforced
+  by a new pre-render check.
+- **Removed a dependency on `s3:ListBucket`, which the agent does not have.**
+  `svc-sagemaker.md` instructed verifying object existence with it. The finding never needed
+  it: if the execution role lacks S3 list permission, that alone produces
+  `ValidationException: No S3 objects found` whether or not the objects exist. The skill now
+  states that reasoning and asserts neither presence nor absence.
+- **Stopped inferring one operation's availability from another's failure.** After
+  `s3:ListBucket` was refused, `s3:GetBucketPolicy` was assumed unavailable and hop 5 was
+  reported undeterminable — while the bucket had a readable policy containing an
+  `aws:SecureTransport` deny, exactly the pattern the skill instructs itself to look for.
+  Every read the hop requires must now be attempted.
+- Pre-render validation grew from 14 checks to 16.
+
 ## [1.1.0] - 2026-08-12
 
 Corrections from end-to-end validation against live Bedrock and SageMaker denials. Each
