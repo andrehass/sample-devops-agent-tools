@@ -383,7 +383,3 @@ cdk destroy
 > The S3 bucket has `removalPolicy: DESTROY` with `autoDeleteObjects: true`, so it will be cleaned up with the stack.
 
 ---
-
-## License
-
-This project is licensed under the MIT No Attribution (MIT-0) License. See the [LICENSE](LICENSE) file.
