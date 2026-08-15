@@ -1919,9 +1919,15 @@ def find_execution_by_idempotency_token(instance_id: str, token: str) -> Optiona
                 response = regional_ssm.get_automation_execution(
                     AutomationExecutionId=execution_id
                 )
+                execution = response['AutomationExecution']
                 return {
                     'executionId': execution_id,
-                    'status': response['AutomationExecution']['AutomationExecutionStatus']
+                    'status': execution['AutomationExecutionStatus'],
+                    'documentName': execution.get('DocumentName', ''),
+                    'region': exec_region,
+                    # Full execution snapshot so the idempotent-replay path can
+                    # run the same wrapper-status augmentation status() uses.
+                    '_execution': execution,
                 }
             except Exception:
                 return None
@@ -3991,14 +3997,22 @@ def start_log_collection(arguments: Dict) -> Dict:
     if idempotency_token:
         existing = find_execution_by_idempotency_token(instance_id, idempotency_token)
         if existing:
-            return success_response({
+            existing_region = existing.get('region', target_region)
+            response_data = {
                 'message': 'Returning existing execution (idempotent)',
                 'executionId': existing['executionId'],
                 'status': existing['status'],
                 'instanceId': instance_id,
-                'region': target_region,
-                'idempotent': True
-            })
+                'region': existing_region,
+                'idempotent': True,
+            }
+            # Mirror the augmentation get_collection_status applies — without
+            # it, a retried collect() with the same token while the wrapper is
+            # paused at aws:approve reports a bare "InProgress" and the agent
+            # cannot tell the run is waiting on a human approval.
+            if _is_approval_wrapper(existing.get('documentName', '')):
+                augment_wrapper_status(existing['_execution'], response_data, existing_region)
+            return success_response(response_data)
 
     # Human-in-the-loop approval gate (M1). When enabled, collection runs via a
     # wrapper document whose FIRST step is the native aws:approve action — the

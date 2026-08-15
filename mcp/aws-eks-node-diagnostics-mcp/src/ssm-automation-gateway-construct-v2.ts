@@ -920,6 +920,21 @@ export class SsmAutomationGatewayV2Construct extends Construct {
       );
     }
 
+    // The approval wrapper documents are regional SSM documents created only in
+    // this stack's home region, so approval-gated collect()/batch_collect()
+    // calls targeting any other allowed region fail at runtime with a 400.
+    // Surface that at synth time instead of on the first cross-region call.
+    if (requireCollectionApproval && allowedRegions.length > 1) {
+      cdk.Annotations.of(this).addWarning(
+        `requireCollectionApproval is enabled but this deployment allows ` +
+        `${allowedRegions.length} regions (${allowedRegions.join(', ')}). The approval ` +
+        `wrapper SSM documents exist only in this stack's home region ` +
+        `(${cdk.Stack.of(this).region}), so approval-gated collect()/batch_collect() ` +
+        `calls targeting the other region(s) will fail with a 400. Deploy a stack in ` +
+        `each region that needs approval-gated collection.`,
+      );
+    }
+
     // Approvers are notified here with the SSM console approval link. SSM
     // requires Automation-approval notification topics to be named with an
     // "Automation" prefix.
