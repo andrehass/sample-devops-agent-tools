@@ -153,3 +153,47 @@ class TestRegexSafety:
     @pytest.mark.parametrize('pattern', ['ERROR|WARN', 'kubelet.*failed', r'\bOOMKilled\b'])
     def test_allows_normal(self, pattern):
         assert mod.is_catastrophic_regex(pattern) is False
+
+
+class TestIdempotentReplayApproval:
+    """A retried collect() with the same idempotencyToken must carry the same
+    human-approval context that status() reports — not a bare InProgress."""
+
+    def _replay(self, monkeypatch, document_name):
+        monkeypatch.setattr(mod, 'COLLECT_APPROVAL_DOCUMENT', 'stack-collect-with-approval')
+        monkeypatch.setattr(mod, 'BATCH_APPROVAL_DOCUMENT', 'stack-batch-collect-with-approval')
+        monkeypatch.setattr(mod, 'resolve_and_validate_region',
+                            lambda arguments, instance_id: ('us-east-1', None))
+        monkeypatch.setattr(mod, 'validate_eks_instance',
+                            lambda instance_id, region: None)
+        monkeypatch.setattr(mod, 'get_regional_client',
+                            lambda service, region: object())
+        monkeypatch.setattr(
+            mod, 'find_execution_by_idempotency_token',
+            lambda instance_id, token: {
+                'executionId': 'wrapper-1',
+                'status': 'InProgress',
+                'documentName': document_name,
+                'region': 'us-east-1',
+                '_execution': _wrapper_execution('Waiting'),
+            },
+        )
+        result = mod.start_log_collection(
+            {'instanceId': INSTANCE, 'idempotencyToken': 'tok-1'}
+        )
+        assert result['statusCode'] == 200
+        return json.loads(result['body'])
+
+    def test_replay_of_pending_wrapper_reports_human_approval(self, monkeypatch):
+        body = self._replay(monkeypatch, 'stack-collect-with-approval')
+        assert body['idempotent'] is True
+        assert body['status'] == 'InProgress'
+        assert body['humanApproval']['state'] == 'pending'
+        assert 'console.aws.amazon.com' in body['humanApproval']['consoleUrl']
+        assert 'nextStep' in body
+
+    def test_replay_of_plain_collection_is_unchanged(self, monkeypatch):
+        body = self._replay(monkeypatch, 'AWSSupport-CollectEKSInstanceLogs')
+        assert body['idempotent'] is True
+        assert body['status'] == 'InProgress'
+        assert 'humanApproval' not in body
