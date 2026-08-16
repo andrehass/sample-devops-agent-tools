@@ -197,3 +197,50 @@ class TestIdempotentReplayApproval:
         assert body['idempotent'] is True
         assert body['status'] == 'InProgress'
         assert 'humanApproval' not in body
+
+
+class TestClusterAllowlistFailClosed:
+    """E2 hardening: an empty allowlist only permits clusters when the operator
+    explicitly acknowledged any-cluster scope (ALLOW_ANY_CLUSTER_NAME)."""
+
+    def test_empty_allowlist_without_acknowledgment_rejects(self, monkeypatch):
+        monkeypatch.setattr(mod, 'ALLOWED_CLUSTER_NAMES', set())
+        monkeypatch.setattr(mod, 'ALLOW_ANY_CLUSTER_NAME', False)
+        result = mod.validate_cluster_name('prod-cluster')
+        assert result is not None and result['statusCode'] == 403
+
+    def test_empty_allowlist_with_acknowledgment_permits(self, monkeypatch):
+        monkeypatch.setattr(mod, 'ALLOWED_CLUSTER_NAMES', set())
+        monkeypatch.setattr(mod, 'ALLOW_ANY_CLUSTER_NAME', True)
+        assert mod.validate_cluster_name('prod-cluster') is None
+
+    def test_allowlisted_cluster_permits(self, monkeypatch):
+        monkeypatch.setattr(mod, 'ALLOWED_CLUSTER_NAMES', {'prod-cluster'})
+        monkeypatch.setattr(mod, 'ALLOW_ANY_CLUSTER_NAME', False)
+        assert mod.validate_cluster_name('prod-cluster') is None
+
+    def test_unlisted_cluster_rejected_even_with_acknowledgment(self, monkeypatch):
+        # An explicit allowlist always wins over the any-cluster acknowledgment.
+        monkeypatch.setattr(mod, 'ALLOWED_CLUSTER_NAMES', {'prod-cluster'})
+        monkeypatch.setattr(mod, 'ALLOW_ANY_CLUSTER_NAME', True)
+        result = mod.validate_cluster_name('other-cluster')
+        assert result is not None and result['statusCode'] == 403
+
+
+class TestReadArtifactRequireInstanceId:
+    """E4 hardening: read()/artifact() must always be scoped to the instance
+    under investigation — omitting instanceId is rejected before any S3 call."""
+
+    def test_read_without_instance_id_rejected(self):
+        result = mod.read_log_chunk({'logKey': VALID_KEY})
+        assert result['statusCode'] == 400
+        assert 'instanceId is required' in result['body']
+
+    def test_artifact_without_instance_id_rejected(self):
+        result = mod.get_artifact_reference({'logKey': VALID_KEY})
+        assert result['statusCode'] == 400
+        assert 'instanceId is required' in result['body']
+
+    def test_read_cross_instance_key_still_rejected(self):
+        result = mod.read_log_chunk({'logKey': VALID_KEY, 'instanceId': OTHER_INSTANCE})
+        assert result['statusCode'] == 403

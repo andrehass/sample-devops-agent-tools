@@ -287,12 +287,19 @@ def resolve_and_validate_region(arguments: Dict, instance_id: str = None) -> tup
 
 # EKS clusters this deployment is permitted to act on. Populated from the
 # ALLOWED_CLUSTER_NAMES env var (the CDK also enforces it at the IAM layer).
-# When empty, no cluster-name allowlist is enforced at the Lambda layer —
-# region and EKS-tag validation still apply.
 ALLOWED_CLUSTER_NAMES = set(
     c.strip() for c in os.environ.get('ALLOWED_CLUSTER_NAMES', '').split(',')
     if c.strip()
 )
+
+# Fail-closed companion to ALLOWED_CLUSTER_NAMES (E2): an empty allowlist only
+# permits all clusters when the operator explicitly acknowledged the broader
+# scope at deploy time (the CDK `allowAnyClusterName: true` flag). Without the
+# acknowledgment, an empty allowlist rejects every cluster instead of allowing
+# every cluster.
+ALLOW_ANY_CLUSTER_NAME = os.environ.get(
+    'ALLOW_ANY_CLUSTER_NAME', ''
+).strip().lower() in ('1', 'true', 'yes')
 
 # Whether to accept nodes that carry ONLY the user-settable
 # kubernetes.io/cluster/* tag (self-managed node groups). The EKS-managed
@@ -307,12 +314,13 @@ ALLOW_SELF_MANAGED_NODES = os.environ.get(
 
 def cluster_name_allowed(cluster_name: Optional[str]) -> bool:
     """
-    True if the cluster is permitted by the Lambda-level allowlist. When the
-    allowlist is empty, all clusters are permitted (region + tag validation
-    still apply).
+    True if the cluster is permitted by the Lambda-level allowlist (E2).
+    Fail-closed: an empty allowlist permits clusters only when the operator
+    explicitly acknowledged any-cluster scope at deploy time
+    (ALLOW_ANY_CLUSTER_NAME=true). Region + tag validation always still apply.
     """
     if not ALLOWED_CLUSTER_NAMES:
-        return True
+        return ALLOW_ANY_CLUSTER_NAME
     return bool(cluster_name) and cluster_name in ALLOWED_CLUSTER_NAMES
 
 
@@ -322,10 +330,14 @@ def validate_cluster_name(cluster_name: str) -> Optional[Dict]:
     (E2 mitigation). Returns None if allowed, or an error_response dict.
     """
     if not cluster_name_allowed(cluster_name):
+        allowed = ', '.join(sorted(ALLOWED_CLUSTER_NAMES)) or (
+            'none — deployment has no cluster allowlist and any-cluster scope '
+            'was not acknowledged (ALLOW_ANY_CLUSTER_NAME)'
+        )
         return error_response(
             403,
             f"Cluster '{cluster_name}' is not permitted by this deployment. "
-            f"Allowed clusters: {', '.join(sorted(ALLOWED_CLUSTER_NAMES))}"
+            f"Allowed clusters: {allowed}"
         )
     return None
 
@@ -4760,9 +4772,17 @@ def read_log_chunk(arguments: Dict) -> Dict:
     line_count = arguments.get('lineCount', DEFAULT_LINE_COUNT)
     
     # E4: restrict to log-bundle keys; blocks arbitrary reads and path traversal.
-    # When instanceId is supplied, the key must belong to that instance (rejects
-    # reading another instance's bundle).
-    key_err = validate_log_key(log_key, expected_instance_id=arguments.get('instanceId'))
+    # instanceId is mandatory so the key is always scoped to the instance under
+    # investigation — omitting it would otherwise allow lateral reads of other
+    # instances' bundles.
+    instance_id = arguments.get('instanceId')
+    if not instance_id:
+        return error_response(
+            400,
+            'instanceId is required: read() only returns log content for the '
+            'instance under investigation.'
+        )
+    key_err = validate_log_key(log_key, expected_instance_id=instance_id)
     if key_err:
         return key_err
     
@@ -5537,8 +5557,16 @@ def get_artifact_reference(arguments: Dict) -> Dict:
     expiration_seconds = min(arguments.get('expirationMinutes', 0) * 60 or PRESIGNED_URL_EXPIRATION, PRESIGNED_URL_EXPIRATION)
     
     # E4: restrict to log-bundle keys; blocks arbitrary reads and path traversal.
-    # When instanceId is supplied, the key must belong to that instance.
-    key_err = validate_log_key(log_key, expected_instance_id=arguments.get('instanceId'))
+    # instanceId is mandatory so presigned URLs are always scoped to the
+    # instance under investigation.
+    instance_id = arguments.get('instanceId')
+    if not instance_id:
+        return error_response(
+            400,
+            'instanceId is required: artifact() only returns URLs for the '
+            'instance under investigation.'
+        )
+    key_err = validate_log_key(log_key, expected_instance_id=instance_id)
     if key_err:
         return key_err
     

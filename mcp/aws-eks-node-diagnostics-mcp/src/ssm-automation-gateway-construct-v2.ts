@@ -1338,6 +1338,9 @@ export class SsmAutomationGatewayV2Construct extends Construct {
         TOOL_AUTHORIZATION: toolAclSerialized,
         PER_CALLER_RATE_LIMIT_PER_MINUTE: String(props.perCallerRateLimitPerMinute ?? 60),
         ALLOWED_CLUSTER_NAMES: (props.allowedClusterNames ?? []).join(','),
+        // Fail-closed companion (E2): with no allowlist, the Lambda rejects all
+        // clusters unless the operator acknowledged any-cluster scope.
+        ALLOW_ANY_CLUSTER_NAME: String(props.allowAnyClusterName ?? false),
         ALLOW_SELF_MANAGED_NODES: String(props.allowSelfManagedNodes ?? false),
         REQUIRE_COLLECTION_APPROVAL: String(requireCollectionApproval),
         APPROVAL_TOPIC_ARN: approvalTopic.topicArn,
@@ -1873,7 +1876,7 @@ export class SsmAutomationGatewayV2Construct extends Construct {
             },
             instanceId: {
               Type: 'string',
-              Description: 'The EC2 instance ID under investigation. Recommended: when provided, the logKey must belong to this instance, preventing reads of another instance\u2019s logs.',
+              Description: 'The EC2 instance ID under investigation. Required: the logKey must belong to this instance, preventing reads of another instance\u2019s logs.',
             },
             startByte: {
               Type: 'integer',
@@ -1892,7 +1895,7 @@ export class SsmAutomationGatewayV2Construct extends Construct {
               Description: 'Number of lines to return when using startLine (default: 1000)',
             },
           },
-          Required: ['logKey'],
+          Required: ['logKey', 'instanceId'],
         },
         OutputSchema: {
           Type: 'object',
@@ -2038,14 +2041,14 @@ export class SsmAutomationGatewayV2Construct extends Construct {
             },
             instanceId: {
               Type: 'string',
-              Description: 'The EC2 instance ID under investigation. Recommended: when provided, the logKey must belong to this instance, preventing presigned URLs for another instance\u2019s data.',
+              Description: 'The EC2 instance ID under investigation. Required: the logKey must belong to this instance, preventing presigned URLs for another instance\u2019s data.',
             },
             expirationMinutes: {
               Type: 'integer',
               Description: 'URL expiration in minutes (default: 15, max: 60)',
             },
           },
-          Required: ['logKey'],
+          Required: ['logKey', 'instanceId'],
         },
         OutputSchema: {
           Type: 'object',
