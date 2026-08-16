@@ -106,4 +106,24 @@ new EksNodeLogMcpStack(app, 'EksNodeLogMcpStack', {
   approvalTtlSeconds: process.env.APPROVAL_TTL_SECONDS
     ? parseInt(process.env.APPROVAL_TTL_SECONDS, 10)
     : undefined,
+
+  // Restricted tools opt-in (network packet capture). Absent from the MCP tool
+  // surface unless listed. tcpdump_capture is ADDITIONALLY approval-gated: every
+  // capture pauses at a native SSM aws:approve step until a designated human
+  // approves it in the Systems Manager console (M3).
+  // Format: ENABLED_RESTRICTED_TOOLS="tcpdump_capture,tcpdump_analyze"
+  enableRestrictedTools: process.env.ENABLED_RESTRICTED_TOOLS
+    ? process.env.ENABLED_RESTRICTED_TOOLS.split(',').map(s => s.trim()).filter(Boolean)
+    : undefined,
+
+  // Presigned URL expiry for pcap downloads (tighter than log artifacts —
+  // captures may contain credentials in transit). Max 300s.
+  pcapPresignedUrlExpirationSeconds: process.env.PCAP_PRESIGNED_URL_EXPIRATION
+    ? parseInt(process.env.PCAP_PRESIGNED_URL_EXPIRATION, 10)
+    : undefined,
+
+  // Size above which a completed pcap is flagged as oversized (advisory).
+  maxPcapBytes: process.env.MAX_PCAP_BYTES
+    ? parseInt(process.env.MAX_PCAP_BYTES, 10)
+    : undefined,
 });

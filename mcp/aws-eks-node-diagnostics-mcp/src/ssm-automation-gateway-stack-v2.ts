@@ -50,6 +50,9 @@ export class EksNodeLogMcpStack extends cdk.Stack {
       vpcSubnetIds: props.vpcSubnetIds,
       toolAuthorization: props.toolAuthorization,
       perCallerRateLimitPerMinute: props.perCallerRateLimitPerMinute,
+      enableRestrictedTools: props.enableRestrictedTools,
+      pcapPresignedUrlExpirationSeconds: props.pcapPresignedUrlExpirationSeconds,
+      maxPcapBytes: props.maxPcapBytes,
     });
   }
 }

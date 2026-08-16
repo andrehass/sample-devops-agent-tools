@@ -408,6 +408,16 @@ elif [ -n "$APPROVAL_APPROVER_ARNS" ]; then
   export APPROVAL_APPROVER_ARNS
 fi
 
+# --- ENABLED_RESTRICTED_TOOLS: opt-in network packet capture tools ---
+# tcpdump_capture/tcpdump_analyze are absent from the MCP tool surface unless
+# listed here. tcpdump_capture is ADDITIONALLY approval-gated: every capture
+# pauses at a native SSM aws:approve step until an approver approves it in the
+# Systems Manager console (same approvers as collection).
+if [ -n "${ENABLED_RESTRICTED_TOOLS:-}" ]; then
+  echo "Restricted tools enabled: $ENABLED_RESTRICTED_TOOLS (tcpdump_capture requires human approval per capture)"
+  export ENABLED_RESTRICTED_TOOLS
+fi
+
 echo ""
 echo "Deploying CDK stack..."
 npx cdk deploy "$STACK_NAME" --require-approval never --outputs-file cdk-outputs.json
