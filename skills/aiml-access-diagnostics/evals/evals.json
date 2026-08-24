@@ -106,6 +106,27 @@
     ]
   },
   {
+    "id": "aiml-access-inference-profile-dual-resource",
+    "prompt": "Bedrock Converse fails with AccessDeniedException for a caller whose policy grants bedrock:InvokeModel on the inference-profile ARN for us.amazon.nova-micro-v1:0, but lists no foundation-model ARNs. Why? No AWS access required.",
+    "expected_output": "Identifies the `us.` prefix as a cross-region inference profile, and explains that invoking one requires permission on both the inference-profile ARN and the underlying foundation-model ARN in every destination region the profile can route to — so granting the profile alone is insufficient. Should also note that an SCP blocking any single destination region fails the whole request.",
+    "assertions": [
+      "contains 'inference profile' or contains 'inference-profile'",
+      "contains 'foundation model' or contains 'foundation-model'",
+      "contains 'both' or contains 'destination region'",
+      "does not contain 'NOT_APPLICABLE' or contains 'hop 1'"
+    ]
+  },
+  {
+    "id": "aiml-access-inference-profile-vs-direct-model",
+    "prompt": "How does the skill tell whether a Bedrock call used a cross-region inference profile or a direct foundation model, and why does it matter? No AWS access required.",
+    "expected_output": "States that a geographic prefix on the model ID (`us.`, `eu.`, `apac.`) indicates a cross-region inference profile, while an unprefixed ID is a direct foundation-model call. Explains that the distinction matters because the profile case requires permission on both resource types across every destination region, whereas the direct case does not.",
+    "assertions": [
+      "contains 'us.' and contains 'eu.'",
+      "contains 'prefix'",
+      "contains 'inference profile' or contains 'inference-profile'"
+    ]
+  },
+  {
     "id": "aiml-access-cross-account-boundary",
     "prompt": "A Bedrock model in another account returns AccessDenied. According to the skill, what can it determine and what can it not? No AWS access required.",
     "expected_output": "States the caller side is verifiable including per-policy-type attribution, while the remote account's resource policy and SCPs are not readable, and names what must be checked in the remote account.",

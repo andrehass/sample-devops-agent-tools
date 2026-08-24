@@ -118,6 +118,15 @@ the resource ARN in the caller's policy.
 
 ## Cross-region inference profiles
 
+**Recognising one from the model identifier.** A system-defined cross-region inference
+profile is identified by a geographic prefix on the model ID — `us.`, `eu.`, or `apac.`,
+as in `us.amazon.nova-micro-v1:0` or `eu.anthropic.claude-3-5-sonnet-20240620-v1:0`. If
+the failing call names an ID with one of those prefixes, it went through an inference
+profile and the two requirements below apply. An ID without a prefix
+(`amazon.nova-micro-v1:0`) is a direct foundation-model call, and hop 5 is
+`NOT_APPLICABLE`. Missing this distinction is what causes the dual-resource requirement to
+be overlooked.
+
 A cross-region inference profile routes a request to one of several regions. This
 creates two requirements that are easy to miss.
 

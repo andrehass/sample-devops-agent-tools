@@ -20,7 +20,7 @@ description: >
   model quality issues, or non-AI/ML services.
 metadata:
   author: tamrish
-  version: "1.2.0"
+  version: "1.2.1"
   aws-devops-agent-skills.agent-types: "Chat tasks, Incident RCA"
   aws-devops-agent-skills.aws-services: "Amazon Bedrock, Amazon SageMaker, AWS IAM"
   aws-devops-agent-skills.technical-domains: "Security"

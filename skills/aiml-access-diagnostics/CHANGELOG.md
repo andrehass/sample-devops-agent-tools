@@ -2,6 +2,25 @@
 
 All notable changes to this skill are documented here. New entries go at the top.
 
+## [1.2.1] - 2026-08-24
+
+### Added
+
+- `svc-bedrock.md` now states how to recognise a cross-region inference profile from the
+  model identifier — the geographic `us.`, `eu.`, and `apac.` prefixes — and contrasts it
+  with an unprefixed direct foundation-model call. The dual-resource requirement was already
+  documented, but nothing told the agent which identifiers it applied to, so an ID like
+  `us.amazon.nova-micro-v1:0` could be read as a plain model and the requirement skipped.
+- Two evals covering inference profiles: one asserting that a profile-only grant is
+  insufficient because both the profile ARN and the underlying foundation-model ARN in every
+  destination region must be permitted, and one asserting the prefix-based distinction
+  between a profile call and a direct model call.
+- A positive trigger query for a cross-region inference profile denial.
+
+Functional evals now 14, trigger queries 13 (6 positive, 7 negative). Raised in review by
+@SruVed — the behaviour was already implemented and verified against a live denial, but had
+no eval coverage.
+
 ## [1.2.0] - 2026-08-12
 
 Architecture inversion, driven by running the skill against live denials in a real Agent

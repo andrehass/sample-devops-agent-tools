@@ -31,6 +31,12 @@
       "rationale": "Hop-4 downstream permission failure, phrased without the word AccessDenied."
     },
     {
+      "id": "trigger-inference-profile-dual-resource",
+      "query": "Converse fails with AccessDeniedException using us.amazon.nova-micro-v1:0 \u2014 the role has bedrock:InvokeModel on the inference profile ARN",
+      "should_trigger": true,
+      "rationale": "Cross-region inference profile denial. Requires permission on both the profile ARN and the underlying foundation-model ARN in every destination region, so the profile-only grant is the gap."
+    },
+    {
       "id": "no-trigger-general-iam-audit",
       "query": "Review my IAM roles for least privilege and tell me which ones are too permissive",
       "should_trigger": false,
@@ -46,13 +52,13 @@
       "id": "no-trigger-s3-accessdenied-non-aiml",
       "query": "My Lambda function gets AccessDenied writing to an S3 bucket",
       "should_trigger": false,
-      "rationale": "Access-denied failure but no AI/ML service involved. Adjacent negative — the error class matches but the service scope does not."
+      "rationale": "Access-denied failure but no AI/ML service involved. Adjacent negative \u2014 the error class matches but the service scope does not."
     },
     {
       "id": "no-trigger-policy-authoring",
       "query": "Write me an IAM policy that allows Bedrock model invocation",
       "should_trigger": false,
-      "rationale": "Policy authoring with no failure. Adjacent negative — mentions Bedrock and IAM but there is nothing to diagnose."
+      "rationale": "Policy authoring with no failure. Adjacent negative \u2014 mentions Bedrock and IAM but there is nothing to diagnose."
     },
     {
       "id": "no-trigger-model-quality",
@@ -64,7 +70,7 @@
       "id": "no-trigger-unsupported-aiml-service",
       "query": "Amazon Textract is returning AccessDenied when I call AnalyzeDocument",
       "should_trigger": false,
-      "rationale": "AI/ML access failure in a service this version does not support. Closest adjacent negative — if the skill activates here it should report unsupported rather than diagnose generically, so either outcome must be checked deliberately during manual validation."
+      "rationale": "AI/ML access failure in a service this version does not support. Closest adjacent negative \u2014 if the skill activates here it should report unsupported rather than diagnose generically, so either outcome must be checked deliberately during manual validation."
     },
     {
       "id": "no-trigger-sagemaker-endpoint-latency",
