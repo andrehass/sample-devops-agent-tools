@@ -1,10 +1,10 @@
 ---
 name: aiml-access-diagnostics
 description: >
-  Diagnoses IAM and access failures for Amazon Bedrock and SageMaker. Traces the
-  authorization chain — caller identity, iam:PassRole, trust policy, role
-  permissions, resource policies, SCPs — to name the denying hop and propose a
-  scoped policy. Read-only.
+  Use this skill when diagnosing IAM and access failures for Bedrock and
+  SageMaker. It traces the authorization chain — caller identity, iam:PassRole,
+  trust policy, role permissions, resource policies, SCPs — to name the denying
+  hop and propose a scoped policy. Read-only.
 
   Use when a Bedrock or SageMaker call fails on permissions: InvokeModel or
   Converse AccessDeniedException, CreateTrainingJob or CreateEndpoint
@@ -32,25 +32,18 @@ Diagnose why an AI/ML service call was denied. Walk the authorization chain hop 
 hop, name the hop that denied the call, and propose a scoped IAM policy for human
 review. Read-only throughout.
 
-## When to Use
+## Checklist
 
-Activate when an AI/ML API call fails with a permission error and the user wants to
-know why. Typical phrasings:
+Work through these steps in order. Each is detailed in its own section below.
 
-- "Bedrock InvokeModel is returning AccessDeniedException"
-- "My SageMaker training job fails with AccessDenied"
-- "`is not authorized to perform: iam:PassRole`"
-- "Why can't my SageMaker execution role read from S3?"
-- "Access denied calling Converse on Claude in us-east-1"
-
-Do NOT activate for:
-
-- General IAM questions with no AI/ML service involved
-- Policy authoring or least-privilege audits where nothing has failed — that is a
-  posture review, not a diagnosis
-- `ThrottlingException`, `ServiceQuotaExceededException`, or quota increases
-- Model output quality, latency, or inference accuracy
-- Access failures in services outside the supported list below
+- [ ] **Step 1 — Classify the request:** confirm the service is Bedrock or SageMaker, and that there is an observed failure (not a speculative audit). Stop otherwise.
+- [ ] **Step 2 — Establish identity and scope:** record the agent's own identity, extract the principal/action/resource ARNs, and flag cross-account.
+- [ ] **Step 3 — Collect evidence, policy reads first:** read the chain's policy documents by hand; use CloudTrail and simulation only as corroboration.
+- [ ] **Step 4 — Walk the chain:** traverse the six hops in precedence order; do not stop at hop 1 just because it passed.
+- [ ] **Step 5 — Apply service-specific knowledge:** rule out non-IAM denial causes for the service explicitly.
+- [ ] **Step 6 — Assign verdicts:** give every hop exactly one token from the closed verdict set.
+- [ ] **Step 7 — Propose a policy:** derive a scoped policy for human review; keep observed and commonly-required permissions labelled separately.
+- [ ] **Step 8 — Deliver the report:** render per the report format, run the pre-render validation, then deliver.
 
 ## Output Discipline
 
