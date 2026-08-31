@@ -2,6 +2,27 @@
 
 All notable changes to this skill are documented here. New entries go at the top.
 
+## [1.2.2] - 2026-08-27
+
+### Changed
+
+- Frontmatter `description` reworded to open imperatively ("Use this skill when
+  diagnosing…") per the Agent Skills guidance on descriptions; the trigger and
+  "do not use" guidance is unchanged and it stays within the 1024-character limit.
+
+### Added
+
+- A `Checklist` section at the top of the SKILL.md body summarizing the eight
+  procedural steps, per the multi-step-workflow best practice.
+
+### Removed
+
+- The redundant `When to Use` body section. Activation guidance already lives in
+  the frontmatter description, so once the skill is loaded the section only spent
+  context. No behavioral change.
+
+Raised in review by @udid-aws.
+
 ## [1.2.1] - 2026-08-24
 
 ### Added
