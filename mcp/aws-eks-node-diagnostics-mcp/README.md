@@ -1,4 +1,4 @@
-# EKS Node Diagnostics MCP
+lets have two gates, # EKS Node Diagnostics MCP
 
 > **⚠️ Proof of Concept (POC):** This project is a proof of concept and should be tested in non-production environments first. Validate thoroughly in a staging or development account before using with production workloads.
 
@@ -366,6 +366,78 @@ After deployment, the script outputs all values needed for the MCP Server config
 | Scope | `ssm-automation-gateway-id/gateway:read` |
 
 Values are also saved to `mcp-config.txt` for reference.
+
+### Tool Classification (Action Approval in Chat)
+
+DevOps Agent supports **action approval in chat** and, for customer-configured (BYO) MCP servers, **per-tool classification**. You classify each tool as `READ_ONLY`, `MUTATIVE`, or `DESTRUCTIVE` on the MCP server association — either in the console when you add the server (it prompts you for each discovered tool), or via the `toolDetails` field if you register the association through the API.
+
+Two things to know before you classify:
+
+- Tools you do **not** classify default to `READ_ONLY`. If you register programmatically and omit `toolDetails`, **every** tool — including `collect`/`batch_collect` — is treated as `READ_ONLY` and runs with no in-chat approval.
+- Tool names must match **exactly** (case-sensitive) the tool names this server exposes.
+
+**Recommended classification for this server's tools:**
+
+| Tool(s) | Behavior | Classification |
+|---------|----------|----------------|
+| `status`, `validate`, `errors`, `read`, `search`, `correlate`, `artifact`, `summarize`, `quick_triage`, `history`, `cluster_health`, `compare_nodes`, `batch_status`, `network_diagnostics`, `storage_diagnostics`, `list_sops`, `get_sop` (17 tools) | Read-only | `READ_ONLY` |
+| `collect` | Mutating — starts SSM Automation on a node | `MUTATIVE` |
+| `batch_collect` | Mutating — fan-out SSM Automation across nodes | `MUTATIVE` |
+| `tcpdump_capture` *(only if `ENABLED_RESTRICTED_TOOLS` includes it)* | Mutating — packet capture on a node | `MUTATIVE` |
+| `tcpdump_analyze` *(only if `ENABLED_RESTRICTED_TOOLS` includes it)* | Read-only | `READ_ONLY` |
+
+No tool in this server is `DESTRUCTIVE` (none delete or irreversibly change resources), so you should not need that classification.
+
+#### ⚠️ Interaction with this server's built-in SSM approval
+
+This server **already** gates `collect`, `batch_collect` (and `tcpdump_capture`) with a native SSM `aws:approve` step — see [Collection Approval (Human-in-the-Loop)](#collection-approval-human-in-the-loop). The new DevOps Agent classification is a **separate** gate. Decide how the two should coexist, because there are two consequences:
+
+1. **Double approval.** If these tools are `MUTATIVE` *and* `REQUIRE_COLLECTION_APPROVAL=true`, an operator approves once **in chat** (DevOps Agent) and a designated approver approves again **in the SSM console** (this server). That is defense-in-depth, but redundant if you only want one gate.
+2. **No autonomous execution.** A `MUTATIVE` tool only runs when approved in chat. If the agent tries to invoke it outside chat (e.g., during an autonomous investigation), the call **fails** instead of prompting. If you need `collect`/`batch_collect` reachable during autonomous investigations (still human-gated at the SSM console), classifying them `MUTATIVE` will block that.
+
+**Choose one configuration:**
+
+- **Option A — Both gates (defense-in-depth, chat-only).** Classify `collect`/`batch_collect` as `MUTATIVE` and keep `REQUIRE_COLLECTION_APPROVAL=true`. Operator approves in chat, then again in the SSM console. These tools will not run in autonomous investigations.
+- **Option B — Native chat approval only.** Classify `collect`/`batch_collect` as `MUTATIVE` and set `REQUIRE_COLLECTION_APPROVAL=false`. A single in-chat approval with CloudTrail attribution to the approver; the custom SSM-console flow is disabled. These tools will not run in autonomous investigations.
+- **Option C — Built-in SSM approval only (keeps autonomous reachability).** Keep `REQUIRE_COLLECTION_APPROVAL=true` and leave the agent-side classification `READ_ONLY`. The agent may call `collect`/`batch_collect` in chat *or* autonomously, but nothing collects until a designated approver approves in the SSM console. Note this deliberately labels a mutating tool `READ_ONLY`, relying on the server's own gate rather than the platform's — only choose this if autonomous reachability matters to you.
+
+**Recommended for this server: Option A (two gates).** The investigating agent asks you for approval **in chat** before it ever invokes `collect`/`batch_collect`, and a designated approver then confirms **in the SSM console** before collection actually runs. This is the most conservative setup and the intended experience when you want a human in the loop at both the agent and the resource layers. It also means these tools never run during autonomous investigations — the agent must prompt you in chat.
+
+To configure Option A:
+
+1. **Enable directed actions** on the agent space. This is the primary control — until it is on, tool classifications and elevated config have no effect. Directed actions are disabled by default.
+
+   **Console:** open the [AWS DevOps Agent console](https://docs.aws.amazon.com/devopsagent/latest/userguide/working-with-devops-agent-working-with-directed-actions.html) → choose your agent space → open the agent space settings → enable directed actions → confirm.
+
+   **CLI:** set the `elevatedActionsEnabled` preference (note: `UpdateAgentSpace` replaces the full preferences map, so include any other preferences you rely on):
+   ```bash
+   aws devops-agent update-agent-space \
+     --agent-space-id <your-agent-space-id> \
+     --preferences elevatedActionsEnabled=true
+   ```
+
+2. **Classify the mutating tools as `MUTATIVE`** on this server's MCP association.
+
+   **Console:** when you add or edit the MCP server association, the console prompts you to classify each discovered tool. Choose `MUTATIVE` for `collect` and `batch_collect` (and `tcpdump_capture` if enabled); leave the other tools `READ_ONLY`.
+
+   **API:** set `toolDetails` on the association — a per-tool list of `{ name, toolClassification }` entries. Each `name` must exactly match (case-sensitive) a tool in the association's enabled-tools list, or registration is rejected. You can classify up to 500 tools per association. Only the mutating tools need entries; anything omitted defaults to `READ_ONLY`:
+   ```json
+   "toolDetails": [
+     { "name": "collect",       "toolClassification": "MUTATIVE" },
+     { "name": "batch_collect", "toolClassification": "MUTATIVE" }
+   ]
+   ```
+
+3. **Keep the built-in SSM approval on** — deploy with `REQUIRE_COLLECTION_APPROVAL=true` (the default) and a valid `APPROVAL_APPROVER_ARNS`. Approvers need `ssm:SendAutomationSignal` and SSM console access.
+
+Result: agent proposes `collect` → you approve in chat → tool runs and returns `status: "pending_approval"` with an `approvalConsoleUrl` → a designated approver approves in the SSM console → collection proceeds and the agent polls `status`.
+
+Every in-chat approval is single-use (or valid for a bounded reuse window you set, up to 4 hours) and is attributed to the approving operator in AWS CloudTrail.
+
+**Reference:** [Working with directed actions](https://docs.aws.amazon.com/devopsagent/latest/userguide/working-with-devops-agent-working-with-directed-actions.html) (AWS DevOps Agent User Guide). See these sections on that page:
+- *Categorizing tools for third-party integrations* — `READ_ONLY` / `MUTATIVE` / `DESTRUCTIVE` meanings and behavior.
+- *Customer-configured MCP servers* — how `toolDetails` classification works for BYO MCP servers.
+- *Approving directed actions* — the in-chat approval flow.
 
 ---
 
